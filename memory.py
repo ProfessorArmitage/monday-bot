@@ -1,75 +1,102 @@
 """
 memory.py — Maneja la memoria del asistente por usuario.
 
-Guarda hechos sobre cada usuario en un archivo JSON local.
-Cada usuario tiene su propio historial de conversación y perfil.
+Usa PostgreSQL como almacenamiento persistente.
+La variable DATABASE_URL la provee Railway automáticamente
+al agregar un plugin de Postgres al proyecto.
 """
 
-import json
 import os
+import json
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 
-MEMORY_FILE = "memory.json"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
-def _load() -> dict:
-    """Carga toda la memoria desde el archivo JSON."""
-    if not os.path.exists(MEMORY_FILE):
-        return {}
-    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _connect():
+    """Abre una conexión a PostgreSQL."""
+    return psycopg2.connect(DATABASE_URL)
 
 
-def _save(data: dict):
-    """Guarda toda la memoria al archivo JSON."""
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _init_db():
+    """
+    Crea la tabla de usuarios si no existe.
+    Se llama automáticamente la primera vez.
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id     BIGINT PRIMARY KEY,
+                    facts       JSONB  NOT NULL DEFAULT '[]',
+                    history     JSONB  NOT NULL DEFAULT '[]',
+                    created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+
+
+# Inicializar la tabla al importar el módulo
+_init_db()
 
 
 def get_user(user_id: int) -> dict:
     """Devuelve el perfil de un usuario. Lo crea si no existe."""
-    data = _load()
-    uid = str(user_id)
-    if uid not in data:
-        data[uid] = {
-            "facts": [],           # Cosas que el asistente aprendió del usuario
-            "history": [],         # Últimos N mensajes (contexto de conversación)
-            "created_at": datetime.now().isoformat(),
-        }
-        _save(data)
-    return data[uid]
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+
+            # Crear usuario nuevo
+            cur.execute("""
+                INSERT INTO users (user_id, facts, history, created_at)
+                VALUES (%s, '[]', '[]', %s)
+                RETURNING *
+            """, (user_id, datetime.now()))
+            conn.commit()
+            return dict(cur.fetchone())
 
 
 def add_fact(user_id: int, fact: str):
-    """
-    Agrega un hecho sobre el usuario.
-    Ejemplo: "Le gusta el café", "Trabaja como diseñador"
-    """
-    data = _load()
-    uid = str(user_id)
-    user = data.setdefault(uid, {"facts": [], "history": [], "created_at": datetime.now().isoformat()})
+    """Agrega un hecho sobre el usuario, evitando duplicados."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            # Obtener facts actuales
+            cur.execute("SELECT facts FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            facts = row[0] if row else []
 
-    # Evitar duplicados exactos
-    if fact not in user["facts"]:
-        user["facts"].append(fact)
-        # Máximo 50 hechos guardados
-        user["facts"] = user["facts"][-50:]
-        _save(data)
+            if fact not in facts:
+                facts.append(fact)
+                facts = facts[-50:]  # máximo 50 hechos
+
+                cur.execute(
+                    "UPDATE users SET facts = %s WHERE user_id = %s",
+                    (json.dumps(facts), user_id)
+                )
+                conn.commit()
 
 
 def add_message(user_id: int, role: str, content: str):
-    """
-    Agrega un mensaje al historial de conversación.
-    role: "user" o "assistant"
-    """
-    data = _load()
-    uid = str(user_id)
-    user = data.setdefault(uid, {"facts": [], "history": [], "created_at": datetime.now().isoformat()})
+    """Agrega un mensaje al historial de conversación."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT history FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            history = row[0] if row else []
 
-    user["history"].append({"role": role, "content": content})
-    # Guardar solo los últimos 20 mensajes para no gastar tokens
-    user["history"] = user["history"][-20:]
-    _save(data)
+            history.append({"role": role, "content": content})
+            history = history[-20:]  # últimos 20 mensajes
+
+            cur.execute(
+                "UPDATE users SET history = %s WHERE user_id = %s",
+                (json.dumps(history), user_id)
+            )
+            conn.commit()
 
 
 def get_history(user_id: int) -> list:
@@ -83,10 +110,7 @@ def get_facts(user_id: int) -> list:
 
 
 def build_system_prompt(user_id: int, base_prompt: str) -> str:
-    """
-    Construye el system prompt completo incluyendo
-    lo que el asistente sabe del usuario.
-    """
+    """Construye el system prompt incluyendo lo que se sabe del usuario."""
     facts = get_facts(user_id)
 
     if facts:
@@ -103,13 +127,11 @@ Lo que sabes sobre este usuario (úsalo para personalizar tus respuestas):
 
 
 def clear_memory(user_id: int):
-    """Borra toda la memoria de un usuario (comando /forget)."""
-    data = _load()
-    uid = str(user_id)
-    if uid in data:
-        data[uid] = {
-            "facts": [],
-            "history": [],
-            "created_at": datetime.now().isoformat(),
-        }
-        _save(data)
+    """Borra toda la memoria de un usuario (comando /olvidar)."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET facts = '[]', history = '[]' WHERE user_id = %s",
+                (user_id,)
+            )
+            conn.commit()
