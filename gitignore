@@ -1,0 +1,7 @@
+# Nunca subir estos archivos a GitHub
+.env
+memory.json
+venv/
+__pycache__/
+*.pyc
+*.pyo
