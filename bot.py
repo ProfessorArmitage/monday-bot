@@ -375,14 +375,13 @@ async def oauth_callback(request: web.Request) -> web.Response:
     try:
         user_id = int(state)
 
-        # Completar el flujo OAuth
-        flow = Flow.from_client_config(
-            google_auth.CLIENT_CONFIG,
-            scopes=google_auth.SCOPES,
-            redirect_uri=f"{RAILWAY_PUBLIC_URL}/oauth/callback"
-        )
-        flow.fetch_token(code=code)
-        creds = flow.credentials
+        # Intercambiar código por tokens usando httpx (sin SDK)
+        tokens = await google_auth.exchange_code_for_tokens(code)
+        from datetime import datetime, timedelta
+        tokens["expires_at"] = (
+            datetime.now() + timedelta(seconds=tokens.get("expires_in", 3600))
+        ).isoformat()
+        memory.save_google_tokens(user_id, tokens)
 
         # Guardar token en PostgreSQL
         import json as _json
