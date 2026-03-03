@@ -37,17 +37,19 @@ def get_auth_url(telegram_user_id: int) -> str:
     Incluye el telegram_user_id en el 'state' para saber
     a qué usuario pertenece el callback.
     """
+    from urllib.parse import urlencode
+
     params = {
         "client_id":     GOOGLE_CLIENT_ID,
         "redirect_uri":  CALLBACK_URL,
         "response_type": "code",
         "scope":         SCOPES,
-        "access_type":   "offline",   # para obtener refresh_token
-        "prompt":        "consent",   # forzar para obtener siempre refresh_token
+        "access_type":   "offline",
+        "prompt":        "consent",
         "state":         str(telegram_user_id),
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
+    # urlencode escapa correctamente todos los caracteres especiales
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
 
 async def exchange_code_for_tokens(code: str) -> dict:
