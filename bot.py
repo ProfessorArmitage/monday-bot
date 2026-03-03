@@ -162,8 +162,11 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
                 return f"✅ Correo enviado a {params.get('to')}."
 
             elif action == "get_email":
-                email = await google_services.get_recent_emails(user_id, **params)
-                return f"📧 De: {email.get('From', '?')}\nAsunto: {email.get('Subject', '?')}"
+                emails = await google_services.get_recent_emails(user_id, max_results=1)
+                if not emails:
+                    return "No hay correos recientes."
+                email = emails[0]
+                return f"📧 De: {email.get('From', '?')}\nAsunto: {email.get('Subject', 'Sin asunto')}"
 
         # ── Docs ──
         elif service == "docs":
