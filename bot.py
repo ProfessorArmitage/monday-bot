@@ -32,9 +32,7 @@ from telegram.ext import (
 import memory
 import google_auth
 import google_services
-import google_auth
 import google_services
-from google_auth_oauthlib.flow import Flow
 
 # ── Configuración ────────────────────────────────────────────
 load_dotenv()
@@ -230,7 +228,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Mensaje de {user_name} ({user_id}): {user_text}")
 
     # Agregar estado de conexión Google al contexto
-    google_status = "✅ Conectado" if google_auth.is_connected(user_id) else "❌ No conectado (usa /conectar_google)"
+    google_status = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado (usa /conectar_google)"
     system_prompt = memory.build_system_prompt(user_id, BASE_SYSTEM_PROMPT)
     system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
 
@@ -295,7 +293,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if google_auth.is_connected(user_id):
+    if memory.has_google_connected(user_id):
         await update.message.reply_text(
             "✅ Ya tienes tu cuenta de Google conectada.\n"
             "Si quieres reconectar usa /desconectar_google primero."
@@ -312,13 +310,13 @@ async def cmd_connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    google_auth.disconnect(user_id)
+    memory.save_google_tokens(user_id, None)
     await update.message.reply_text("✅ Cuenta de Google desconectada.")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    google_ok = "✅ Conectado" if google_auth.is_connected(user_id) else "❌ No conectado"
+    google_ok = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado"
     facts_count = len(memory.get_facts(user_id))
     await update.message.reply_text(
         f"📊 *Estado de tu asistente:*\n\n"
