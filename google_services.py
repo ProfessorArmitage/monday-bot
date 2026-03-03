@@ -18,17 +18,20 @@ from google_auth import get_valid_token
 # GOOGLE CALENDAR
 # ════════════════════════════════════════════════════════════
 
-async def get_upcoming_events(user_id: int, max_results: int = 5, days: int = 7, **kwargs) -> list:
-    """Devuelve los próximos eventos del calendario."""
+async def get_upcoming_events(user_id: int, max_results: int = 10, days: int = 7, **kwargs) -> list:
+    """Devuelve los próximos eventos del calendario dentro de un rango de días."""
     token = await get_valid_token(user_id)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    time_min = now.isoformat()
+    time_max = (now + timedelta(days=days)).isoformat()
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
             headers={"Authorization": f"Bearer {token}"},
             params={
-                "timeMin": now,
+                "timeMin": time_min,
+                "timeMax": time_max,
                 "maxResults": max_results,
                 "singleEvents": True,
                 "orderBy": "startTime",
@@ -64,17 +67,43 @@ async def create_event(user_id: int, title: str = "", start: str = "", end: str 
 # GMAIL
 # ════════════════════════════════════════════════════════════
 
-async def get_recent_emails(user_id: int, max_results: int = 5, limit: int = None, **kwargs) -> list:
+def _build_gmail_query(sender=None, subject=None, extra=None):
+    """Construye un query de búsqueda para Gmail."""
+    parts = ["in:inbox"]
+    if sender:  parts.append(f"from:{sender}")
+    if subject: parts.append(f"subject:{subject}")
+    if extra:   parts.append(extra)
+    return " ".join(parts)
+
+
+def _extract_body(payload):
+    """Extrae el texto plano del cuerpo de un mensaje recursivamente."""
+    import base64
+    if payload.get("mimeType") == "text/plain":
+        data_b64 = payload.get("body", {}).get("data", "")
+        if data_b64:
+            return base64.urlsafe_b64decode(data_b64 + "==").decode("utf-8", errors="ignore")
+    for part in payload.get("parts", []):
+        result = _extract_body(part)
+        if result:
+            return result
+    return ""
+
+
+async def get_recent_emails(user_id: int, max_results: int = 5, limit: int = None,
+                             sender: str = None, subject: str = None, **kwargs) -> list:
+    """
+    Devuelve correos recientes con SOLO asunto, remitente y fecha.
+    Rápido — usa metadatos, no descarga el cuerpo.
+    """
     if limit: max_results = limit
-    """Devuelve los correos más recientes (asunto + remitente)."""
     token = await get_valid_token(user_id)
 
     async with httpx.AsyncClient() as client:
-        # Obtener lista de IDs
         r = await client.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers={"Authorization": f"Bearer {token}"},
-            params={"maxResults": max_results, "labelIds": "INBOX"}
+            params={"maxResults": max_results, "q": _build_gmail_query(sender, subject)}
         )
         r.raise_for_status()
         messages = r.json().get("messages", [])
@@ -84,12 +113,59 @@ async def get_recent_emails(user_id: int, max_results: int = 5, limit: int = Non
             r2 = await client.get(
                 f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
                 headers={"Authorization": f"Bearer {token}"},
-                params={"format": "metadata", "metadataHeaders": ["Subject", "From"]}
+                params={"format": "metadata", "metadataHeaders": ["Subject", "From", "Date"]}
             )
             r2.raise_for_status()
-            headers = r2.json().get("payload", {}).get("headers", [])
-            email = {h["name"]: h["value"] for h in headers if h["name"] in ["Subject", "From"]}
-            emails.append(email)
+            data = r2.json()
+            hdrs = {h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])}
+            emails.append({
+                "id":      msg["id"],
+                "Subject": hdrs.get("Subject", "Sin asunto"),
+                "From":    hdrs.get("From", "Desconocido"),
+                "Date":    hdrs.get("Date", ""),
+                "snippet": data.get("snippet", ""),
+            })
+
+        return emails
+
+
+async def get_email_full(user_id: int, max_results: int = 1, limit: int = None,
+                          sender: str = None, subject: str = None, **kwargs) -> list:
+    """
+    Devuelve correos con el cuerpo completo incluido.
+    Más lento — descarga el contenido completo de cada mensaje.
+    """
+    if limit: max_results = limit
+    token = await get_valid_token(user_id)
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"maxResults": max_results, "q": _build_gmail_query(sender, subject)}
+        )
+        r.raise_for_status()
+        messages = r.json().get("messages", [])
+
+        emails = []
+        for msg in messages:
+            r2 = await client.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"format": "full"}
+            )
+            r2.raise_for_status()
+            data = r2.json()
+            payload = data.get("payload", {})
+            hdrs = {h["name"]: h["value"] for h in payload.get("headers", [])}
+            emails.append({
+                "id":      msg["id"],
+                "Subject": hdrs.get("Subject", "Sin asunto"),
+                "From":    hdrs.get("From", "Desconocido"),
+                "Date":    hdrs.get("Date", ""),
+                "Body":    _extract_body(payload)[:3000].strip(),
+                "snippet": data.get("snippet", ""),
+            })
 
         return emails
 
@@ -170,8 +246,11 @@ async def get_doc_content(user_id: int, doc_id: str) -> str:
 # GOOGLE DRIVE
 # ════════════════════════════════════════════════════════════
 
-async def search_files(user_id: int, query: str = "", max_results: int = 5, **kwargs) -> list:
-    """Busca archivos en Google Drive."""
+async def search_files(user_id: int, query: str = "", keyword: str = None,
+                        name: str = None, max_results: int = 5, **kwargs) -> list:
+    """Busca archivos en Google Drive por nombre o keyword."""
+    if keyword: query = keyword
+    if name:    query = name
     token = await get_valid_token(user_id)
 
     async with httpx.AsyncClient() as client:

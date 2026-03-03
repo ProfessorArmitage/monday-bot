@@ -129,12 +129,17 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
         # ── Calendar ──
         if service == "calendar":
             if action == "list_events":
+                # Mapear period → days
+                period = params.pop("period", None)
+                if period == "day":   params["days"] = 1
+                elif period == "week": params["days"] = 7
+                elif period == "month": params["days"] = 30
                 events = await google_services.get_upcoming_events(user_id, **params)
                 if not events:
-                    return "No tienes eventos próximos."
-                lines = [f"📅 *Próximos eventos:*"]
+                    return "No tienes eventos en ese período."
+                lines = ["📅 Eventos:"]
                 for e in events:
-                    start_time = e.get('start', {}).get('dateTime', e.get('start', {}).get('date', ''))[:16].replace('T', ' ')
+                    start_time = e.get("start", {}).get("dateTime", e.get("start", {}).get("date", ""))[:16].replace("T", " ")
                     lines.append(f"• {e.get('summary', 'Sin título')} — {start_time}")
                 return "\n".join(lines)
 
@@ -152,21 +157,26 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
                 emails = await google_services.get_recent_emails(user_id, **params)
                 if not emails:
                     return "No hay correos nuevos."
-                lines = ["📧 *Correos recientes:*"]
+                lines = ["📧 Correos recientes:"]
                 for e in emails:
-                    lines.append(f"• {e.get('Subject', e.get('subject', 'Sin asunto'))} — {e.get('From', e.get('from', '?'))[:40]}")
-                return "\n".join(lines)
+                    lines.append(f"• {e.get('Subject','Sin asunto')}\n  De: {e.get('From','?')[:40]}\n  {e.get('snippet','')[:80]}")
+                return "\n\n".join(lines)
 
             elif action == "send_email":
                 await google_services.send_email(user_id, **params)
                 return f"✅ Correo enviado a {params.get('to')}."
 
             elif action == "get_email":
-                emails = await google_services.get_recent_emails(user_id, max_results=1)
+                # Descarga el cuerpo completo del correo
+                emails = await google_services.get_email_full(user_id, **params)
                 if not emails:
-                    return "No hay correos recientes."
+                    return "No hay correos que coincidan."
                 email = emails[0]
-                return f"📧 De: {email.get('From', '?')}\nAsunto: {email.get('Subject', 'Sin asunto')}"
+                body = email.get("Body", email.get("snippet", "Sin contenido"))[:1500]
+                return (f"📧 De: {email.get('From','?')}\n"
+                        f"Asunto: {email.get('Subject','Sin asunto')}\n"
+                        f"Fecha: {email.get('Date','?')}\n\n"
+                        f"{body}")
 
         # ── Docs ──
         elif service == "docs":
@@ -205,13 +215,21 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
 
         # ── Drive ──
         elif service == "drive":
-            if action in ("list_files", "search"):
+            if action == "list_files":
                 files = await google_services.list_recent_files(user_id, **params)
                 if not files:
                     return "No se encontraron archivos."
-                lines = ["💾 *Archivos encontrados:*"]
+                lines = ["📁 Archivos recientes:"]
                 for f in files:
-                    lines.append(f"• [{f['name']}]({f['link']})")
+                    lines.append(f"• {f.get('name','?')} — {f.get('webViewLink','')}")
+                return "\n".join(lines)
+            elif action == "search":
+                files = await google_services.search_files(user_id, **params)
+                if not files:
+                    return "No se encontraron archivos con ese nombre."
+                lines = ["🔍 Resultados:"]
+                for f in files:
+                    lines.append(f"• {f.get('name','?')} — {f.get('webViewLink','')}")
                 return "\n".join(lines)
 
         return "⚠️ Acción no reconocida."
