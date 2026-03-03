@@ -135,3 +135,47 @@ def clear_memory(user_id: int):
                 (user_id,)
             )
             conn.commit()
+
+
+# ── Tokens de Google OAuth ────────────────────────────────────
+
+def save_google_tokens(user_id: int, tokens: dict):
+    """Guarda los tokens de Google OAuth del usuario."""
+    import json
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            # Agregar columna google_tokens si no existe
+            cur.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS google_tokens JSONB DEFAULT NULL
+            """)
+            cur.execute(
+                "UPDATE users SET google_tokens = %s WHERE user_id = %s",
+                (json.dumps(tokens), user_id)
+            )
+            # Si el usuario no existe aún, crearlo
+            if cur.rowcount == 0:
+                cur.execute("""
+                    INSERT INTO users (user_id, facts, history, google_tokens)
+                    VALUES (%s, '[]', '[]', %s)
+                """, (user_id, json.dumps(tokens)))
+            conn.commit()
+
+
+def get_google_tokens(user_id: int) -> dict | None:
+    """Devuelve los tokens de Google del usuario, o None si no ha conectado."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT google_tokens FROM users
+                WHERE user_id = %s
+            """, (user_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0]
+            return None
+
+
+def has_google_connected(user_id: int) -> bool:
+    """Devuelve True si el usuario ya conectó su cuenta de Google."""
+    return get_google_tokens(user_id) is not None

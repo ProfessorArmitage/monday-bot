@@ -1,21 +1,23 @@
 """
-bot.py — Asistente personal en Telegram con memoria.
+bot.py — Asistente personal en Telegram con memoria y Google Workspace.
 
 Stack:
-  - python-telegram-bot  →  conexión con Telegram
-  - Gemini REST API      →  IA gratis, sin SDK (compatible con Python 3.14+)
-  - httpx                →  cliente HTTP async para llamar a Gemini
-  - memory.py            →  memoria persistente por usuario
-
-Flujo:
-  Usuario escribe → bot recibe → agrega contexto/memoria
-  → llama a Gemini REST → extrae nuevos hechos → responde al usuario
+  - python-telegram-bot  →  Telegram
+  - Groq REST API        →  IA (LLaMA 3.3)
+  - httpx                →  HTTP async
+  - memory.py            →  Memoria persistente en PostgreSQL
+  - google_auth.py       →  OAuth 2.0 con Google
+  - google_services.py   →  Calendar, Gmail, Docs, Sheets, Drive
+  - aiohttp              →  Servidor web para el callback de OAuth
 """
 
 import os
 import re
+import json
 import logging
+import asyncio
 import httpx
+from aiohttp import web
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -28,12 +30,19 @@ from telegram.ext import (
 )
 
 import memory
+import google_auth
+import google_services
+import google_auth
+import google_services
+from google_auth_oauthlib.flow import Flow
 
 # ── Configuración ────────────────────────────────────────────
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TELEGRAM_TOKEN     = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY")
+RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "http://localhost:8080")
+PORT               = int(os.getenv("PORT", 8080))
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
     raise ValueError("Falta TELEGRAM_TOKEN o GROQ_API_KEY en el archivo .env")
@@ -46,38 +55,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Prompt base del asistente ────────────────────────────────
-BASE_SYSTEM_PROMPT = """Eres un asistente personal amigable, empático e inteligente.
+# Referencia global al bot para usarla en el callback de OAuth
+telegram_app = None
 
-Tu objetivo principal es conocer bien al usuario y personalizar cada respuesta según lo que sabes de él.
+# ── Prompt base ───────────────────────────────────────────────
+BASE_SYSTEM_PROMPT = """Eres un asistente personal inteligente con acceso a Google Workspace.
 
-Reglas importantes:
-1. Responde siempre en el idioma que use el usuario.
-2. Si el usuario menciona algo personal (nombre, trabajo, gustos, horarios, objetivos, etc.),
-   recuérdalo y úsalo naturalmente en futuras respuestas.
-3. Haz preguntas cortas y naturales para conocer mejor al usuario, pero sin ser invasivo.
-4. Sé conciso: respuestas cortas y útiles, no párrafos interminables.
-5. Tienes memoria de las conversaciones anteriores, así que nunca preguntes algo que ya te dijeron.
+Puedes ayudar con:
+- 📅 Google Calendar: agendar, consultar y eliminar eventos
+- 📧 Gmail: leer, buscar y enviar correos
+- 📄 Google Docs: crear y consultar documentos
+- 📊 Google Sheets: crear hojas y registrar datos
+- 💾 Google Drive: buscar y listar archivos
 
-Al final de tu respuesta, si detectaste un nuevo hecho sobre el usuario,
-agrégalo en una línea especial con el formato:
-[FACT: descripción breve del hecho]
+Reglas:
+1. Responde siempre en el idioma del usuario.
+2. Cuando el usuario quiera realizar una acción de Google Workspace, responde con un bloque
+   JSON especial al FINAL de tu mensaje con este formato exacto:
+   [ACTION: {"service": "calendar|gmail|docs|sheets|drive", "action": "nombre_accion", "params": {...}}]
+3. Si el usuario no ha conectado Google, dile que use /conectar_google.
+4. Recuerda siempre lo que sabes del usuario y personaliza tus respuestas.
+5. Sé conciso y útil.
 
-Ejemplos de [FACT]:
-[FACT: Se llama Carlos]
-[FACT: Trabaja como desarrollador web]
-[FACT: Prefiere respuestas cortas]
-[FACT: Tiene un perro llamado Max]
+Acciones disponibles por servicio:
+- calendar: list_events, create_event, delete_event
+- gmail: list_emails, send_email, get_email
+- docs: create, get_content, append_text
+- sheets: create, read, append, write
+- drive: list_files, search
 
-Solo agrega [FACT] si aprendiste algo nuevo y concreto.
-El usuario NO verá estas líneas [FACT], son solo para tu memoria interna.
+Ejemplos de [ACTION]:
+[ACTION: {"service": "calendar", "action": "list_events", "params": {"days": 7}}]
+[ACTION: {"service": "gmail", "action": "send_email", "params": {"to": "juan@gmail.com", "subject": "Hola", "body": "¿Cómo estás?"}}]
+[ACTION: {"service": "docs", "action": "create", "params": {"title": "Mi documento", "content": "Contenido inicial"}}]
+
+Al final de tu respuesta, si aprendiste algo nuevo del usuario:
+[FACT: descripción breve]
 """
 
 
-# ── Llamada a la API REST de Groq ───────────────────────────
-async def call_gemini(system_prompt: str, history: list, user_text: str) -> str:
-    """Llama a Groq via REST con httpx. Gratis, sin cuotas raras, compatible con Python 3.14+."""
-
+# ── Llamada a Groq ────────────────────────────────────────────
+async def call_groq(system_prompt: str, history: list, user_text: str) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
@@ -86,10 +104,9 @@ async def call_gemini(system_prompt: str, history: list, user_text: str) -> str:
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": messages,
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "temperature": 0.7,
     }
-
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
@@ -103,7 +120,108 @@ async def call_gemini(system_prompt: str, history: list, user_text: str) -> str:
     return data["choices"][0]["message"]["content"].strip()
 
 
-# ── Función principal: procesar un mensaje ───────────────────
+# ── Ejecutar acción de Google ────────────────────────────────
+async def execute_google_action(user_id: int, action_data: dict) -> str:
+    """Ejecuta la acción de Google Workspace y retorna un resumen del resultado."""
+    service = action_data.get("service")
+    action  = action_data.get("action")
+    params  = action_data.get("params", {})
+
+    try:
+        # ── Calendar ──
+        if service == "calendar":
+            if action == "list_events":
+                events = google_services.calendar_list_events(user_id, **params)
+                if not events:
+                    return "No tienes eventos próximos."
+                lines = [f"📅 *Próximos eventos:*"]
+                for e in events:
+                    lines.append(f"• {e['title']} — {e['start'][:16].replace('T',' ')}")
+                return "\n".join(lines)
+
+            elif action == "create_event":
+                result = google_services.calendar_create_event(user_id, **params)
+                return f"✅ Evento creado: [ver en Calendar]({result['link']})"
+
+            elif action == "delete_event":
+                google_services.calendar_delete_event(user_id, **params)
+                return "✅ Evento eliminado."
+
+        # ── Gmail ──
+        elif service == "gmail":
+            if action == "list_emails":
+                emails = google_services.gmail_list_emails(user_id, **params)
+                if not emails:
+                    return "No hay correos nuevos."
+                lines = ["📧 *Correos recientes:*"]
+                for e in emails:
+                    lines.append(f"• *{e['subject']}* — {e['from'][:30]}\n  _{e['snippet'][:80]}_")
+                return "\n".join(lines)
+
+            elif action == "send_email":
+                google_services.gmail_send_email(user_id, **params)
+                return f"✅ Correo enviado a {params.get('to')}."
+
+            elif action == "get_email":
+                email = google_services.gmail_get_email(user_id, **params)
+                return f"📧 *De:* {email['from']}\n*Asunto:* {email['subject']}\n\n{email['body'][:500]}"
+
+        # ── Docs ──
+        elif service == "docs":
+            if action == "create":
+                result = google_services.docs_create(user_id, **params)
+                return f"✅ Documento creado: [abrir]({result['link']})"
+
+            elif action == "get_content":
+                content = google_services.docs_get_content(user_id, **params)
+                return f"📄 *Contenido del documento:*\n{content[:1000]}"
+
+            elif action == "append_text":
+                google_services.docs_append_text(user_id, **params)
+                return "✅ Texto agregado al documento."
+
+        # ── Sheets ──
+        elif service == "sheets":
+            if action == "create":
+                result = google_services.sheets_create(user_id, **params)
+                return f"✅ Hoja creada: [abrir]({result['link']})"
+
+            elif action == "read":
+                data = google_services.sheets_read(user_id, **params)
+                if not data:
+                    return "La hoja está vacía."
+                rows = "\n".join([" | ".join(row) for row in data[:10]])
+                return f"📊 *Datos:*\n```\n{rows}\n```"
+
+            elif action == "append":
+                result = google_services.sheets_append(user_id, **params)
+                return f"✅ {result['updated_rows']} fila(s) agregada(s)."
+
+            elif action == "write":
+                result = google_services.sheets_write(user_id, **params)
+                return f"✅ {result['updated_cells']} celda(s) actualizadas."
+
+        # ── Drive ──
+        elif service == "drive":
+            if action in ("list_files", "search"):
+                files = google_services.drive_list_files(user_id, **params)
+                if not files:
+                    return "No se encontraron archivos."
+                lines = ["💾 *Archivos encontrados:*"]
+                for f in files:
+                    lines.append(f"• [{f['name']}]({f['link']})")
+                return "\n".join(lines)
+
+        return "⚠️ Acción no reconocida."
+
+    except PermissionError:
+        return "⚠️ No has conectado tu cuenta de Google. Usa /conectar_google."
+    except Exception as e:
+        logger.error(f"Error ejecutando acción Google: {e}")
+        return f"⚠️ Error al ejecutar la acción: {str(e)[:100]}"
+
+
+# ── Procesar mensaje principal ────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id   = update.effective_user.id
     user_name = update.effective_user.first_name or "Usuario"
@@ -111,115 +229,221 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Mensaje de {user_name} ({user_id}): {user_text}")
 
-    # 1. Construir system prompt con memoria del usuario
+    # Agregar estado de conexión Google al contexto
+    google_status = "✅ Conectado" if google_auth.is_connected(user_id) else "❌ No conectado (usa /conectar_google)"
     system_prompt = memory.build_system_prompt(user_id, BASE_SYSTEM_PROMPT)
+    system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
 
-    # 2. Obtener historial de conversación
     hist = memory.get_history(user_id)
-
-    # 3. Mostrar "escribiendo..." mientras se procesa
     await update.message.chat.send_action("typing")
 
-    # 4. Llamar a Gemini via REST
     try:
-        full_reply = await call_gemini(system_prompt, hist, user_text)
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Error HTTP de Groq: {e.response.status_code} — {e.response.text}")
-        await update.message.reply_text(
-            "Ups, Groq devolvió un error. Verifica que tu GROQ_API_KEY sea correcta. 🙏"
-        )
-        return
+        full_reply = await call_groq(system_prompt, hist, user_text)
     except Exception as e:
         logger.error(f"Error llamando a Groq: {e}")
-        await update.message.reply_text(
-            "Ups, hubo un problema conectándome. Intenta en un momento 🙏"
-        )
+        await update.message.reply_text("Ups, hubo un problema. Intenta en un momento 🙏")
         return
 
-    # 5. Extraer [FACT]s antes de enviar la respuesta al usuario
+    # Extraer y ejecutar acciones de Google
+    action_match = re.search(r'\[ACTION:\s*({.+?})\]', full_reply, re.DOTALL)
+    action_result = ""
+    if action_match:
+        try:
+            action_data = json.loads(action_match.group(1))
+            action_result = await execute_google_action(user_id, action_data)
+        except json.JSONDecodeError:
+            logger.error("No se pudo parsear el ACTION JSON")
+
+    # Extraer FACTs
     facts_found = re.findall(r'\[FACT:\s*(.+?)\]', full_reply)
     for fact in facts_found:
         memory.add_fact(user_id, fact.strip())
-        logger.info(f"Nuevo hecho guardado para {user_id}: {fact.strip()}")
 
-    # 6. Limpiar la respuesta (quitar líneas [FACT] internas)
-    clean_reply = re.sub(r'\[FACT:.*?\]\n?', '', full_reply).strip()
+    # Limpiar la respuesta
+    clean_reply = re.sub(r'\[ACTION:.*?\]', '', full_reply, flags=re.DOTALL)
+    clean_reply = re.sub(r'\[FACT:.*?\]', '', clean_reply)
+    clean_reply = clean_reply.strip()
 
-    # 7. Guardar el intercambio en el historial
+    # Guardar en historial
     memory.add_message(user_id, "user", user_text)
     memory.add_message(user_id, "assistant", clean_reply)
 
-    # 8. Responder al usuario
-    await update.message.reply_text(clean_reply)
+    # Enviar respuesta
+    if clean_reply:
+        await update.message.reply_text(clean_reply, parse_mode="Markdown")
+
+    # Enviar resultado de la acción Google si hay
+    if action_result:
+        await update.message.reply_text(action_result, parse_mode="Markdown")
 
 
-# ── Comandos ─────────────────────────────────────────────────
+# ── Comandos ──────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name or "!"
     await update.message.reply_text(
-        f"¡Hola {name}! 👋 Soy tu asistente personal.\n\n"
-        "Cuéntame sobre ti — ¿en qué puedo ayudarte hoy?\n\n"
-        "Comandos útiles:\n"
-        "  /memoria — ver lo que sé de ti\n"
-        "  /olvidar — borrar toda mi memoria de ti\n"
-        "  /ayuda   — ver todos los comandos"
+        f"¡Hola {name}! 👋 Soy tu asistente personal con acceso a Google Workspace.\n\n"
+        "Puedo ayudarte con tu calendario, correos, documentos y más.\n\n"
+        "Para conectar tu cuenta de Google usa:\n"
+        "  /conectar_google\n\n"
+        "Otros comandos:\n"
+        "  /memoria  — ver lo que sé de ti\n"
+        "  /olvidar  — borrar mi memoria\n"
+        "  /estado   — ver estado de conexiones\n"
+        "  /ayuda    — ver todos los comandos"
+    )
+
+
+async def cmd_connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if google_auth.is_connected(user_id):
+        await update.message.reply_text(
+            "✅ Ya tienes tu cuenta de Google conectada.\n"
+            "Si quieres reconectar usa /desconectar_google primero."
+        )
+        return
+
+    auth_url = google_auth.get_auth_url(user_id)
+    await update.message.reply_text(
+        "Para conectar tu cuenta de Google, abre este link y autoriza el acceso:\n\n"
+        f"{auth_url}\n\n"
+        "Después de autorizar, regresa aquí y el bot confirmará la conexión automáticamente."
+    )
+
+
+async def cmd_disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    google_auth.disconnect(user_id)
+    await update.message.reply_text("✅ Cuenta de Google desconectada.")
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    google_ok = "✅ Conectado" if google_auth.is_connected(user_id) else "❌ No conectado"
+    facts_count = len(memory.get_facts(user_id))
+    await update.message.reply_text(
+        f"📊 *Estado de tu asistente:*\n\n"
+        f"Google Workspace: {google_ok}\n"
+        f"Hechos en memoria: {facts_count}\n\n"
+        f"Usa /conectar_google para vincular tu cuenta de Google.",
+        parse_mode="Markdown"
     )
 
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     facts   = memory.get_facts(user_id)
-
     if not facts:
-        await update.message.reply_text(
-            "Todavía no sé mucho sobre ti. ¡Cuéntame más! 😊"
-        )
+        await update.message.reply_text("Todavía no sé mucho sobre ti. ¡Cuéntame más! 😊")
     else:
         facts_list = "\n".join(f"• {f}" for f in facts)
-        await update.message.reply_text(
-            f"Esto es lo que sé sobre ti:\n\n{facts_list}"
-        )
+        await update.message.reply_text(f"Esto es lo que sé sobre ti:\n\n{facts_list}")
 
 
 async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    memory.clear_memory(user_id)
-    await update.message.reply_text(
-        "Listo, borré toda mi memoria sobre ti. ¡Empezamos de cero! 🧹"
-    )
+    memory.clear_memory(update.effective_user.id)
+    await update.message.reply_text("Listo, borré toda mi memoria sobre ti. 🧹")
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Comandos disponibles:\n\n"
-        "/start    — iniciar el asistente\n"
-        "/memoria  — ver lo que sé de ti\n"
-        "/olvidar  — borrar mi memoria\n"
-        "/ayuda    — este mensaje\n\n"
-        "Simplemente escríbeme cualquier cosa para conversar 💬"
+        "/start              — iniciar el asistente\n"
+        "/conectar_google    — vincular cuenta de Google\n"
+        "/desconectar_google — desvincular cuenta de Google\n"
+        "/estado             — ver estado de conexiones\n"
+        "/memoria            — ver lo que sé de ti\n"
+        "/olvidar            — borrar mi memoria\n"
+        "/ayuda              — este mensaje\n\n"
+        "Ejemplos de lo que puedes pedirme:\n"
+        "• ¿Qué tengo en el calendario esta semana?\n"
+        "• Agéndame una reunión mañana a las 3pm\n"
+        "• ¿Tengo correos sin leer?\n"
+        "• Envíale un correo a juan@gmail.com\n"
+        "• Crea un documento con mis notas de hoy\n"
+        "• Busca el archivo de presupuesto en Drive"
     )
 
 
-# ── Arrancar el bot ───────────────────────────────────────────
-# Python 3.14 es más estricto con asyncio: hay que crear el event loop
-# explícitamente en lugar de depender de get_event_loop().
-import asyncio
+# ── Servidor OAuth callback ───────────────────────────────────
+async def oauth_callback(request: web.Request) -> web.Response:
+    """Recibe el callback de Google OAuth y guarda el token."""
+    code     = request.rel_url.query.get("code")
+    state    = request.rel_url.query.get("state")   # user_id
+    error    = request.rel_url.query.get("error")
 
+    if error or not code or not state:
+        return web.Response(text="Error en la autorización. Cierra esta ventana y vuelve a intentarlo.", content_type="text/html")
+
+    try:
+        user_id = int(state)
+
+        # Completar el flujo OAuth
+        flow = Flow.from_client_config(
+            google_auth.CLIENT_CONFIG,
+            scopes=google_auth.SCOPES,
+            redirect_uri=f"{RAILWAY_PUBLIC_URL}/oauth/callback"
+        )
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+
+        # Guardar token en PostgreSQL
+        import json as _json
+        google_auth.save_token(user_id, _json.loads(creds.to_json()))
+
+        # Notificar al usuario en Telegram
+        if telegram_app:
+            await telegram_app.bot.send_message(
+                chat_id=user_id,
+                text="✅ ¡Google conectado exitosamente!\n\n"
+                     "Ya puedo acceder a tu Calendar, Gmail, Docs, Sheets y Drive.\n"
+                     "¿En qué te puedo ayudar?"
+            )
+
+        return web.Response(
+            text="<h2>✅ ¡Conexión exitosa!</h2><p>Puedes cerrar esta ventana y volver a Telegram.</p>",
+            content_type="text/html"
+        )
+
+    except Exception as e:
+        logger.error(f"Error en OAuth callback: {e}")
+        return web.Response(text=f"Error: {e}", content_type="text/html")
+
+
+async def start_web_server():
+    """Inicia el servidor web para el callback de OAuth."""
+    app = web.Application()
+    app.router.add_get("/oauth/callback", oauth_callback)
+    app.router.add_get("/health", lambda r: web.Response(text="OK"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"✅ Servidor OAuth iniciado en puerto {PORT}")
+
+
+# ── Arrancar todo ─────────────────────────────────────────────
 async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    global telegram_app
 
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("memoria", cmd_memory))
-    app.add_handler(CommandHandler("olvidar", cmd_forget))
-    app.add_handler(CommandHandler("ayuda",   cmd_help))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    telegram_app.add_handler(CommandHandler("start",              cmd_start))
+    telegram_app.add_handler(CommandHandler("conectar_google",    cmd_connect_google))
+    telegram_app.add_handler(CommandHandler("desconectar_google", cmd_disconnect_google))
+    telegram_app.add_handler(CommandHandler("estado",             cmd_status))
+    telegram_app.add_handler(CommandHandler("memoria",            cmd_memory))
+    telegram_app.add_handler(CommandHandler("olvidar",            cmd_forget))
+    telegram_app.add_handler(CommandHandler("ayuda",              cmd_help))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Iniciar servidor web y bot en paralelo
+    await start_web_server()
 
     logger.info("✅ Bot iniciado. Esperando mensajes...")
 
-    async with app:
-        await app.start()
-        await app.updater.start_polling()
-        # Mantener el bot corriendo hasta Ctrl+C
+    async with telegram_app:
+        await telegram_app.start()
+        await telegram_app.updater.start_polling()
         await asyncio.Event().wait()
 
 
