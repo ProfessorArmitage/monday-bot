@@ -29,11 +29,17 @@ def _init_db():
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id     BIGINT PRIMARY KEY,
-                    facts       JSONB  NOT NULL DEFAULT '[]',
-                    history     JSONB  NOT NULL DEFAULT '[]',
-                    created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+                    user_id       BIGINT PRIMARY KEY,
+                    facts         JSONB  NOT NULL DEFAULT '[]',
+                    history       JSONB  NOT NULL DEFAULT '[]',
+                    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+                    google_tokens JSONB  DEFAULT NULL
                 )
+            """)
+            # Agregar columna si ya existía la tabla sin ella
+            cur.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS google_tokens JSONB DEFAULT NULL
             """)
         conn.commit()
 
