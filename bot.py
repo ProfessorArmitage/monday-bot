@@ -129,7 +129,7 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
         # ── Calendar ──
         if service == "calendar":
             if action == "list_events":
-                events = google_services.calendar_list_events(user_id, **params)
+                events = google_services.get_upcoming_events(user_id, **params)
                 if not events:
                     return "No tienes eventos próximos."
                 lines = [f"📅 *Próximos eventos:*"]
@@ -138,17 +138,17 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
                 return "\n".join(lines)
 
             elif action == "create_event":
-                result = google_services.calendar_create_event(user_id, **params)
+                result = google_services.create_event(user_id, **params)
                 return f"✅ Evento creado: [ver en Calendar]({result['link']})"
 
             elif action == "delete_event":
-                google_services.calendar_delete_event(user_id, **params)
+                google_services.delete_event(user_id, **params)
                 return "✅ Evento eliminado."
 
         # ── Gmail ──
         elif service == "gmail":
             if action == "list_emails":
-                emails = google_services.gmail_list_emails(user_id, **params)
+                emails = google_services.get_recent_emails(user_id, **params)
                 if not emails:
                     return "No hay correos nuevos."
                 lines = ["📧 *Correos recientes:*"]
@@ -157,52 +157,52 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
                 return "\n".join(lines)
 
             elif action == "send_email":
-                google_services.gmail_send_email(user_id, **params)
+                google_services.send_email(user_id, **params)
                 return f"✅ Correo enviado a {params.get('to')}."
 
             elif action == "get_email":
-                email = google_services.gmail_get_email(user_id, **params)
+                email = google_services.get_recent_emails(user_id, **params)
                 return f"📧 *De:* {email['from']}\n*Asunto:* {email['subject']}\n\n{email['body'][:500]}"
 
         # ── Docs ──
         elif service == "docs":
             if action == "create":
-                result = google_services.docs_create(user_id, **params)
+                result = google_services.create_doc(user_id, **params)
                 return f"✅ Documento creado: [abrir]({result['link']})"
 
             elif action == "get_content":
-                content = google_services.docs_get_content(user_id, **params)
+                content = google_services.get_doc_content(user_id, **params)
                 return f"📄 *Contenido del documento:*\n{content[:1000]}"
 
             elif action == "append_text":
-                google_services.docs_append_text(user_id, **params)
+                google_services.create_doc(user_id, **params)
                 return "✅ Texto agregado al documento."
 
         # ── Sheets ──
         elif service == "sheets":
             if action == "create":
-                result = google_services.sheets_create(user_id, **params)
+                result = google_services.append_to_sheet(user_id, **params)
                 return f"✅ Hoja creada: [abrir]({result['link']})"
 
             elif action == "read":
-                data = google_services.sheets_read(user_id, **params)
+                data = google_services.read_sheet(user_id, **params)
                 if not data:
                     return "La hoja está vacía."
                 rows = "\n".join([" | ".join(row) for row in data[:10]])
                 return f"📊 *Datos:*\n```\n{rows}\n```"
 
             elif action == "append":
-                result = google_services.sheets_append(user_id, **params)
+                result = google_services.append_to_sheet(user_id, **params)
                 return f"✅ {result['updated_rows']} fila(s) agregada(s)."
 
             elif action == "write":
-                result = google_services.sheets_write(user_id, **params)
+                result = google_services.append_to_sheet(user_id, **params)
                 return f"✅ {result['updated_cells']} celda(s) actualizadas."
 
         # ── Drive ──
         elif service == "drive":
             if action in ("list_files", "search"):
-                files = google_services.drive_list_files(user_id, **params)
+                files = google_services.list_recent_files(user_id, **params)
                 if not files:
                     return "No se encontraron archivos."
                 lines = ["💾 *Archivos encontrados:*"]
