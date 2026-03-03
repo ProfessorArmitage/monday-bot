@@ -383,10 +383,6 @@ async def oauth_callback(request: web.Request) -> web.Response:
         ).isoformat()
         memory.save_google_tokens(user_id, tokens)
 
-        # Guardar token en PostgreSQL
-        import json as _json
-        google_auth.save_token(user_id, _json.loads(creds.to_json()))
-
         # Notificar al usuario en Telegram
         if telegram_app:
             await telegram_app.bot.send_message(
