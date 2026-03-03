@@ -268,11 +268,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Enviar respuesta
     if clean_reply:
-        await update.message.reply_text(clean_reply, parse_mode="Markdown")
+        await update.message.reply_text(clean_reply)
 
     # Enviar resultado de la acción Google si hay
     if action_result:
-        await update.message.reply_text(action_result, parse_mode="Markdown")
+        await update.message.reply_text(action_result)
 
 
 # ── Comandos ──────────────────────────────────────────────────
