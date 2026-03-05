@@ -662,7 +662,7 @@ async def cmd_mi_asistente(update: Update, context: ContextTypes.DEFAULT_TYPE):
         frase = " ".join(args[1:])
         memory.update_bot_identity(user_id, frase=frase)
         await update.message.reply_text(
-            f"Perfecto — trataré de ser: "{frase}" ✅"
+            f'Perfecto — trataré de ser: "{frase}" ✅'
         )
 
     elif subcmd == "reset":
@@ -673,16 +673,11 @@ async def cmd_mi_asistente(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
         await update.message.reply_text(
-            "Uso:
-"
-            "/mi_asistente               → ver configuración
-"
-            "/mi_asistente nombre Luna   → cambiar nombre
-"
-            "/mi_asistente tono casual   → formal | casual | directo
-"
-            "/mi_asistente frase [texto] → cómo quieres ser tratado
-"
+            "Uso:\n"
+            "/mi_asistente               → ver configuración\n"
+            "/mi_asistente nombre Luna   → cambiar nombre\n"
+            "/mi_asistente tono casual   → formal | casual | directo\n"
+            "/mi_asistente frase [texto] → cómo quieres ser tratado\n"
             "/mi_asistente reset         → volver a identidad global"
         )
 
