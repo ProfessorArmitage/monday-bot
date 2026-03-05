@@ -402,6 +402,17 @@ def remove_skill(user_id: int, skill_id: str):
 
 
 
+
+def save_skills(user_id: int, skills: list):
+    """Guarda la lista completa de skills (reemplaza todas)."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET skills = %s WHERE user_id = %s",
+                (json.dumps(skills), user_id)
+            )
+            conn.commit()
+
 # ── Identidad del asistente por usuario ──────────────────────
 
 def get_bot_identity(user_id: int) -> dict:

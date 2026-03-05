@@ -10,6 +10,7 @@ Usa APScheduler para ejecutar tareas en segundo plano:
 import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
+import tz_utils
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -51,7 +52,7 @@ async def get_all_users() -> list[int]:
 
 # ── HEARTBEAT ─────────────────────────────────────────────────
 
-async def _check_hooks(user_id: int, hooks: list, now: datetime) -> list:
+async def _check_hooks(user_id: int, hooks: list, user_data: dict) -> list:
     """
     Evalúa los hooks configurados por el usuario y devuelve alertas.
     Tipos soportados:
@@ -102,9 +103,8 @@ async def _check_hooks(user_id: int, hooks: list, now: datetime) -> list:
                     if valor in titulo:
                         start_str = event.get("start", {}).get("dateTime", "")
                         if start_str:
-                            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-                            start_local = start_dt.replace(tzinfo=None)
-                            mins = (start_local - now).total_seconds() / 60
+                            start_dt = tz_utils.parse_google_dt(start_str)
+                            mins = tz_utils.minutes_until(start_dt, user_data)
                             if 0 < mins <= 60:
                                 alerts.append(
                                     f"📅 Evento '{desc}' en {int(mins)} min:\n"
@@ -128,11 +128,10 @@ async def heartbeat(single_user: int = None):
     logger.info("💓 Heartbeat ejecutándose...")
 
     users = [single_user] if single_user else await get_all_google_users()
-    now = datetime.now()
-
     for user_id in users:
         try:
             alerts = []
+            user_data = memory.get_user(user_id)
 
             # ── 1. Reuniones próximas (siempre activo) ────────────
             events = await google_services.get_upcoming_events(user_id, max_results=10, days=1)
@@ -140,9 +139,8 @@ async def heartbeat(single_user: int = None):
                 start_str = event.get("start", {}).get("dateTime", "")
                 if not start_str:
                     continue
-                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-                start_local = start_dt.replace(tzinfo=None)
-                mins_until = (start_local - now).total_seconds() / 60
+                start_dt = tz_utils.parse_google_dt(start_str)
+                mins_until = tz_utils.minutes_until(start_dt, user_data)
                 if 0 < mins_until <= 30:
                     alerts.append(
                         f"⏰ Reunión en {int(mins_until)} minutos:\n"
@@ -153,7 +151,7 @@ async def heartbeat(single_user: int = None):
             prefs = memory.get_category(user_id, "preferencias")
             hooks = prefs.get("hooks", [])
             if hooks:
-                hook_alerts = await _check_hooks(user_id, hooks, now)
+                hook_alerts = await _check_hooks(user_id, hooks, user_data)
                 alerts.extend(hook_alerts)
 
             # ── 3. Skills con trigger=heartbeat ───────────────────
@@ -182,14 +180,16 @@ async def morning_briefing():
     """
     logger.info("🌅 Enviando briefing matutino...")
 
-    current_hour = datetime.now().hour
     users = await get_all_google_users()
-    today = datetime.now().strftime("%A %d de %B")
 
     for user_id in users:
         try:
-            # Verificar si este usuario quiere el briefing en esta hora
+            # Obtener hora local del usuario (respeta su timezone y DST)
             user = memory.get_user(user_id)
+            user_now = tz_utils.now_for_user(user)
+            current_hour = user_now.hour
+            today = user_now.strftime("%A %d de %B")
+
             ritmo = user.get("ritmo", {})
             preferred = ritmo.get("briefing_hora", "07:00")
             try:
@@ -197,7 +197,7 @@ async def morning_briefing():
             except Exception:
                 preferred_hour = 7
             if preferred_hour != current_hour:
-                continue  # no es su hora
+                continue  # no es su hora en su timezone
 
             sections = [f"🌅 Buenos días! Aquí tu briefing del {today}*\n"]
 
@@ -329,7 +329,7 @@ def start_scheduler() -> AsyncIOScheduler:
     Crea y arranca el scheduler con todas las tareas.
     Devuelve el scheduler para que bot.py lo pueda detener limpiamente.
     """
-    scheduler = AsyncIOScheduler(timezone="America/Mexico_City")
+    scheduler = AsyncIOScheduler(timezone="UTC")  # Jobs run in UTC, per-user tz handled in logic
 
     # Heartbeat cada 30 minutos
     scheduler.add_job(heartbeat, "interval", minutes=30, id="heartbeat")

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.1.0"
+MANIFEST_VERSION = "1.2.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -56,6 +56,17 @@ CHANGELOG = {
             "El onboarding ahora incluye un paso para personalizar al asistente",
         ],
         "accion_requerida": "Prueba /mi_asistente para personalizar cómo me llamo y cómo te trato",
+    },
+    "1.2.0": {
+        "titulo": "Skills personalizadas y evolutivas",
+        "cambios": [
+            "Las skills ahora se personalizan con tu contexto real al activarlas",
+            "Las skills evolucionan automáticamente cuando aprendes algo nuevo",
+            "Nuevo comando /evolucion para actualizar skills manualmente",
+            "Nuevo comando /nueva_skill para crear skills desde cero",
+            "Nuevo comando /mis_skills para ver tus skills activas y su estado",
+        ],
+        "accion_requerida": "Prueba /mis_skills para ver tus skills actuales y /nueva_skill para crear una propia",
     },
     # Ejemplo de cómo agregar la próxima versión:
     # "1.1.0": {
@@ -117,9 +128,11 @@ SKILLS_CATALOG = [
         "name": "Correo formal",
         "description": "Redactar correos profesionales y formales",
         "content": (
-            "Cuando redactes un correo, usa un tono profesional y formal. "
-            "Incluye saludo apropiado, desarrollo claro y despedida cordial. "
-            "Revisa gramática y ortografía antes de enviar."
+            "Cuando redactes un correo para {{nombre}}, usa un tono profesional y formal. "
+            "Si escribe a alguien de {{empresa}} o a {{contactos_clave}}, adapta el saludo "
+            "al nivel de confianza. Incluye saludo apropiado, desarrollo claro y despedida "
+            "cordial. Revisa gramática y ortografía antes de enviar. "
+            "Tono base del usuario: {{tono}}."
         ),
         "trigger": "manual",
         "emoji": "📧",
@@ -143,9 +156,11 @@ SKILLS_CATALOG = [
         "name": "Gestor de tareas",
         "description": "Organizar y priorizar tareas pendientes",
         "content": (
-            "Ayuda al usuario a organizar sus tareas. Cuando mencione pendientes, "
-            "clasifícalos por urgencia (Alta/Media/Baja) e impacto. "
-            "Sugiere en qué orden abordarlos y ofrece dividir tareas grandes."
+            "Ayuda a {{nombre}} a organizar sus tareas. Considera siempre "
+            "sus proyectos activos: {{proyectos_activos}}. "
+            "Clasifica los pendientes por urgencia (Alta/Media/Baja) "
+            "y relaciónalos con su meta de la semana: {{meta_semana}}. "
+            "Sugiere el orden de atención y ofrece dividir tareas grandes."
         ),
         "trigger": "manual",
         "emoji": "✅",
@@ -156,8 +171,10 @@ SKILLS_CATALOG = [
         "name": "Briefing matutino",
         "description": "Resumen personalizado cada mañana",
         "content": (
-            "Cada mañana incluye en el briefing: una frase motivacional breve, "
-            "y un recordatorio del objetivo más importante del usuario para esta semana."
+            "En el briefing de {{nombre}} a las {{briefing_hora}}, "
+            "incluye siempre: una frase motivacional breve, "
+            "un recordatorio de su meta de la semana ({{meta_semana}}) "
+            "y una revisión rápida de sus proyectos activos: {{proyectos_activos}}."
         ),
         "trigger": "morning",
         "emoji": "🌅",

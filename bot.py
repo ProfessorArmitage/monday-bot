@@ -37,6 +37,7 @@ import workspace_memory
 import conversation_context
 import provisioning
 import identity as identity_module
+import skills as skills_engine
 from scheduler import start_scheduler, init_scheduler
 
 # ── Configuración ────────────────────────────────────────────
@@ -261,6 +262,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if hint:
         system_prompt += f"\n\nINSTRUCCIÓN DE CONTEXTO: {hint}"
 
+    # Inyectar skills activas relevantes para este contexto
+    active_skills = memory.get_skills(user_id)
+    skills_block = skills_engine.build_skills_prompt_block(active_skills, ctx)
+    if skills_block:
+        system_prompt += skills_block
+
     # Bootstrap: si el usuario ya tiene Google y no tiene doc todavía, crearlo
     if memory.has_google_connected(user_id):
         import asyncio
@@ -303,9 +310,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     facts_found = re.findall(r'\[FACT:\s*(.+?)\]', full_reply)
     for fact in facts_found:
         memory.add_fact(user_id, fact.strip())
+    # Auto-evolucionar skills cuando se aprenden hechos relevantes
+    if facts_found:
+        asyncio.create_task(skills_engine.auto_evolve_from_facts(
+            user_id, [f.strip() for f in facts_found], memory, call_groq
+        ))
     # Sincronizar al Google Doc cuando se aprende algo nuevo
     if facts_found and memory.has_google_connected(user_id):
-        import asyncio
         asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
 
     # Limpiar la respuesta
@@ -546,14 +557,21 @@ async def cmd_activate_skill(update: Update, context: ContextTypes.DEFAULT_TYPE)
     skill = provisioning.find_skill_by_name(name)
     if not skill:
         await update.message.reply_text(
-            f"No encontre una skill llamada '{name}'.\n"
-            "Usa /skills para ver las disponibles."
+            f"No encontré una skill llamada '{name}'.\n"
+            "Usa /skills para ver el catálogo disponible."
         )
         return
 
-    memory.save_skill(user_id, skill)
+    await update.message.chat.send_action("typing")
+    skill_entry = await skills_engine.activate_skill_personalized(
+        user_id, skill, memory, call_groq
+    )
+    has_personal = bool(skill_entry.get("content_personal"))
+    personal_note = " y la personalicé con tu contexto 🎯" if has_personal else ""
     await update.message.reply_text(
-        f"{skill['emoji']} Skill {skill['name']} activada.\n{skill['description']}"
+        f"{skill_entry['emoji']} Skill *{skill_entry['name']}* activada ✅{personal_note}\n\n"
+        f"{skill_entry['description']}",
+        parse_mode="Markdown"
     )
 
 
@@ -614,6 +632,142 @@ async def cmd_sync_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Sincronizacion completada.\n{url}"
     )
+
+
+async def cmd_evolucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Regenera la versión personalizada de una skill con la memoria actual.
+    Uso: /evolucion [nombre_skill]   → evoluciona una skill específica
+         /evolucion todas            → evoluciona todas las activas
+    """
+    user_id = update.effective_user.id
+    args = " ".join(context.args).strip() if context.args else ""
+
+    active_skills = memory.get_skills(user_id)
+    if not active_skills:
+        await update.message.reply_text("No tienes skills activas. Usa /skills para ver el catálogo.")
+        return
+
+    await update.message.chat.send_action("typing")
+
+    if args.lower() == "todas":
+        evolved = []
+        for skill in active_skills:
+            result = await skills_engine.evolve_skill(
+                user_id, skill["id"], "evolución manual solicitada por usuario", memory, call_groq
+            )
+            if result:
+                evolved.append(skill.get("emoji","🛠") + " " + skill.get("name",""))
+        if evolved:
+            await update.message.reply_text(
+                "✅ Skills actualizadas con tu memoria actual:\n" + "\n".join(evolved)
+            )
+        else:
+            await update.message.reply_text("No se pudo evolucionar ninguna skill.")
+        return
+
+    # Buscar skill por nombre
+    if not args:
+        names = [f"{s.get('emoji','🛠')} {s.get('name',s.get('id',''))}" for s in active_skills]
+        await update.message.reply_text(
+            "¿Cuál skill quieres actualizar?\n\n"
+            + "\n".join(names)
+            + "\n\nUso: /evolucion [nombre] o /evolucion todas"
+        )
+        return
+
+    skill = next((s for s in active_skills if args.lower() in s.get("name","").lower()
+                  or args.lower() == s.get("id","")), None)
+    if not skill:
+        await update.message.reply_text(f"No encontré una skill activa con ese nombre: '{args}'")
+        return
+
+    result = await skills_engine.evolve_skill(
+        user_id, skill["id"], "evolución manual por usuario", memory, call_groq
+    )
+    if result:
+        await update.message.reply_text(
+            f"✅ {result.get('emoji','🛠')} *{result.get('name','')}* actualizada "
+            f"(evolución #{result.get('evolution_count',1)})",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("No pude actualizar esa skill. Intenta de nuevo.")
+
+
+async def cmd_nueva_skill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Crea una skill personalizada desde cero basada en la descripción del usuario.
+    Uso: /nueva_skill [descripción de lo que quieres que haga]
+    """
+    user_id = update.effective_user.id
+    description = " ".join(context.args).strip() if context.args else ""
+
+    if not description:
+        await update.message.reply_text(
+            "Describe qué quieres que haga tu nueva skill.\n\n"
+            "Ejemplos:\n"
+            "/nueva_skill ayúdame a preparar reportes ejecutivos para mi jefe\n"
+            "/nueva_skill cuando hable de clientes, recuérdame siempre hacer seguimiento\n"
+            "/nueva_skill analiza mis correos y detecta oportunidades de negocio"
+        )
+        return
+
+    await update.message.chat.send_action("typing")
+    skill = await skills_engine.create_custom_skill(user_id, description, memory, call_groq)
+
+    if skill:
+        await update.message.reply_text(
+            f"{skill['emoji']} Skill *{skill['name']}* creada y activada ✅\n\n"
+            f"{skill['description']}\n\n"
+            f"Ya está activa en tus conversaciones. Puedes actualizarla con /evolucion {skill['name']}",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("No pude crear la skill. Intenta con una descripción más específica.")
+
+
+async def cmd_mis_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra las skills activas con su contenido personalizado."""
+    user_id = update.effective_user.id
+    active = memory.get_skills(user_id)
+
+    if not active:
+        await update.message.reply_text(
+            "No tienes skills activas.\n"
+            "Usa /skills para ver el catálogo y /activar_skill [nombre] para activar una."
+        )
+        return
+
+    stale = skills_engine.check_skills_needing_evolution(active)
+    stale_ids = {s.get("id") for s in stale}
+
+    lines = [f"🛠 Tus skills activas ({len(active)}):"]
+    for skill in active:
+        emoji = skill.get("emoji", "🛠")
+        name = skill.get("name", skill.get("id", ""))
+        count = skill.get("evolution_count", 0)
+        is_stale = skill.get("id") in stale_ids
+        stale_note = " ⚠️ desactualizada" if is_stale else ""
+        lines.append(f"\n{emoji} *{name}*{stale_note}")
+        lines.append(f"   Evoluciones: {count}")
+        content = skill.get("content_personal") or skill.get("content_base", "")
+        if content:
+            lines.append(f"   {content[:120]}...")
+
+    if stale:
+        lines.append(f"\n⚠️ {len(stale)} skill(s) con más de 30 días sin actualizar.")
+        lines.append("Usa /evolucion todas para refrescarlas.")
+
+    # Suggest new skills based on user memory
+    user_data = memory.get_user(user_id)
+    active_ids = [s.get("id") for s in active]
+    suggestions = skills_engine.suggest_skills_for_user(user_data, active_ids)
+    if suggestions:
+        lines.append(f"\n💡 Skills que podrían interesarte: {', '.join(suggestions)}")
+        lines.append("Usa /activar_skill [nombre] para activarlas.")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_mi_asistente(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -724,6 +878,9 @@ async def main():
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(CommandHandler("version", cmd_version))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
+    telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))
+    telegram_app.add_handler(CommandHandler("nueva_skill", cmd_nueva_skill))
+    telegram_app.add_handler(CommandHandler("mis_skills", cmd_mis_skills))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Iniciar servidor web y bot en paralelo

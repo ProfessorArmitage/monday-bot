@@ -11,6 +11,7 @@ Servicios disponibles:
 
 import httpx
 from datetime import datetime, timezone, timedelta
+import tz_utils
 from google_auth import get_valid_token
 
 
@@ -41,24 +42,81 @@ async def get_upcoming_events(user_id: int, max_results: int = 10, days: int = 7
         return r.json().get("items", [])
 
 
-async def create_event(user_id: int, title: str = "", start: str = "", end: str = "", description: str = "", **kwargs) -> dict:
+async def create_event(user_id: int, title: str = "", start: str = "", end: str = "",
+                      description: str = "", attendees: list = None,
+                      timezone: str = None, **kwargs) -> dict:
     """
     Crea un evento en Google Calendar.
-    start y end deben ser strings ISO 8601, ej: "2025-03-15T10:00:00-06:00"
+    start y end pueden ser:
+      - ISO 8601 completo: "2026-03-15T10:00:00-06:00"
+      - ISO 8601 sin offset: "2026-03-15T10:00:00" (se añade timezone)
+      - Solo fecha: "2026-03-15" (se crea evento de día completo)
+    Si end está vacío, se asume 1 hora después de start.
     """
     token = await get_valid_token(user_id)
+
+    # Resolver timezone del usuario o usar default
+    import memory as _mem
+    user = _mem.get_user(user_id)
+    tz = timezone or user.get("ritmo", {}).get("zona_horaria", "America/Mexico_City")
+
+    # Normalizar fechas usando tz_utils (respeta DST automáticamente)
+    start_norm, start_allday = tz_utils.normalize_datetime_for_calendar(start, tz)
+    end_norm, end_allday = tz_utils.normalize_datetime_for_calendar(end, tz)
+
+    # Si no hay end, inferir 1 hora después del start
+    if not end_norm and start_norm:
+        if start_allday:
+            # All-day: el end es el día siguiente
+            from datetime import date, timedelta
+            d = date.fromisoformat(start_norm)
+            end_norm = (d + timedelta(days=1)).isoformat()
+            end_allday = True
+        else:
+            try:
+                # Parsear con offset
+                dt = datetime.fromisoformat(start_norm)
+                end_dt = dt + timedelta(hours=1)
+                end_norm = end_dt.isoformat()
+            except Exception:
+                end_norm = start_norm  # fallback
+
+    # Construir body según si es all-day o con hora
+    if start_allday:
+        body = {
+            "summary": title,
+            "description": description,
+            "start": {"date": start_norm},
+            "end":   {"date": end_norm},
+        }
+    else:
+        body = {
+            "summary":     title,
+            "description": description,
+            "start": {"dateTime": start_norm, "timeZone": tz},
+            "end":   {"dateTime": end_norm,   "timeZone": tz},
+        }
+
+    # Agregar asistentes si los hay
+    if attendees:
+        body["attendees"] = [
+            {"email": a} if isinstance(a, str) else a
+            for a in attendees
+        ]
+
+    import logging
+    logging.getLogger(__name__).info(f"create_event payload: {body}")
 
     async with httpx.AsyncClient() as client:
         r = await client.post(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
             headers={"Authorization": f"Bearer {token}"},
-            json={
-                "summary":     title,
-                "description": description,
-                "start": {"dateTime": start, "timeZone": "America/Mexico_City"},
-                "end":   {"dateTime": end,   "timeZone": "America/Mexico_City"},
-            }
+            json=body
         )
+        if r.status_code >= 400:
+            logging.getLogger(__name__).error(
+                f"Google Calendar 400: {r.text}"
+            )
         r.raise_for_status()
         return r.json()
 

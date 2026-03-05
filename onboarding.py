@@ -20,6 +20,7 @@ Pasos:
 import json
 import logging
 import memory
+import tz_utils
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +113,21 @@ Responde SOLO con JSON:
   "fin_dia": "HH:MM",
   "briefing_hora": "HH:MM",
   "dias_libres": ["sábado", "domingo"],
-  "zona_horaria": "America/Mexico_City"
+  "zona_horaria": "IANA_timezone_string"
 }
-Infiere la zona horaria si mencionó su ciudad. Usa null para lo que no se mencione.
+Para zona_horaria, usa el nombre IANA correcto según la ciudad del usuario:
+- México DF / CDMX / Guadalajara → America/Mexico_City
+- Monterrey → America/Monterrey
+- Tijuana / Mexicali → America/Tijuana
+- Bogotá / Medellín → America/Bogota
+- Lima → America/Lima
+- Santiago → America/Santiago
+- Buenos Aires → America/Argentina/Buenos_Aires
+- Madrid / Barcelona → Europe/Madrid
+- Nueva York / Miami → America/New_York
+- Los Ángeles → America/Los_Angeles
+Si no mencionó ciudad, usa null (NO uses America/Mexico_City como default).
+Usa null para cualquier campo no mencionado.
 """,
     },
     {
@@ -254,6 +267,12 @@ async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
         else:
             # Son dicts — merge con lo existente
             clean = {k: v for k, v in extracted.items() if v is not None}
+            # Si es ritmo y no tiene zona_horaria, inferir de la ubicación
+            if step["id"] == "ritmo" and "zona_horaria" not in clean:
+                ubicacion = memory.get_category(user_id, "identidad").get("ubicacion", "")
+                inferred = tz_utils.infer_tz_from_city(ubicacion) if ubicacion else None
+                if inferred:
+                    clean["zona_horaria"] = inferred
             memory.update_category(user_id, categoria, clean)
 
     except Exception as e:
