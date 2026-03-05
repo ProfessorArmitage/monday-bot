@@ -32,6 +32,7 @@ from telegram.ext import (
 import memory
 import google_auth
 import google_services
+import onboarding
 import skills as skills_module
 from scheduler import start_scheduler, init_scheduler
 import google_services
@@ -245,6 +246,19 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
 
 # ── Procesar mensaje principal ────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ── Interceptar respuestas de onboarding ──────────────────
+    user_id = update.effective_user.id
+    if onboarding.is_in_onboarding(user_id):
+        await update.message.chat.send_action("typing")
+        next_question = await onboarding.process_answer(
+            user_id,
+            update.message.text,
+            call_groq
+        )
+        if next_question:
+            await update.message.reply_text(next_question)
+        return
+    # ─────────────────────────────────────────────────────────
     user_id   = update.effective_user.id
     user_name = update.effective_user.first_name or "Usuario"
     user_text = update.message.text
@@ -301,18 +315,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Comandos ──────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = update.effective_user.first_name or "!"
-    await update.message.reply_text(
-        f"¡Hola {name}! 👋 Soy tu asistente personal con acceso a Google Workspace.\n\n"
-        "Puedo ayudarte con tu calendario, correos, documentos y más.\n\n"
-        "Para conectar tu cuenta de Google usa:\n"
-        "  /conectar_google\n\n"
-        "Otros comandos:\n"
-        "  /memoria  — ver lo que sé de ti\n"
-        "  /olvidar  — borrar mi memoria\n"
-        "  /estado   — ver estado de conexiones\n"
-        "  /ayuda    — ver todos los comandos"
-    )
+    user_id = update.effective_user.id
+    name = update.effective_user.first_name or ""
+
+    if memory.is_new_user(user_id):
+        # Usuario nuevo — iniciar entrevista de onboarding
+        first_question = onboarding.get_first_question(user_id)
+        await update.message.reply_text(first_question)
+    else:
+        # Usuario conocido — saludo personalizado
+        user = memory.get_user(user_id)
+        nombre = user.get("identidad", {}).get("nombre", name)
+        await update.message.reply_text(
+            f"¡Hola de nuevo, {nombre}! 👋\n\n"
+            "¿En qué te puedo ayudar hoy?\n\n"
+            "Usa /ayuda para ver todos los comandos."
+        )
 
 
 async def cmd_connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -353,12 +371,50 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    facts   = memory.get_facts(user_id)
-    if not facts:
-        await update.message.reply_text("Todavía no sé mucho sobre ti. ¡Cuéntame más! 😊")
+    user = memory.get_user(user_id)
+
+    sections = []
+
+    identidad = user.get("identidad", {})
+    if identidad:
+        parts = [f"{k}: {v}" for k, v in identidad.items() if v]
+        if parts: sections.append("👤 Identidad\n" + "\n".join(f"  • {p}" for p in parts))
+
+    trabajo = user.get("trabajo", {})
+    if trabajo:
+        parts = [f"{k}: {v}" for k, v in trabajo.items() if v]
+        if parts: sections.append("💼 Trabajo\n" + "\n".join(f"  • {p}" for p in parts))
+
+    proyectos = user.get("proyectos", [])
+    if proyectos:
+        names = [p.get("nombre", str(p)) if isinstance(p, dict) else str(p) for p in proyectos]
+        sections.append("🚀 Proyectos\n" + "\n".join(f"  • {n}" for n in names))
+
+    metas = user.get("metas", {})
+    if metas:
+        parts = [f"{k}: {v}" for k, v in metas.items() if v]
+        if parts: sections.append("🎯 Metas\n" + "\n".join(f"  • {p}" for p in parts))
+
+    relaciones = user.get("relaciones", [])
+    if relaciones:
+        names = [f"{r.get('nombre','?')} ({r.get('relacion','?')})" if isinstance(r, dict) else str(r) for r in relaciones]
+        sections.append("👥 Personas clave\n" + "\n".join(f"  • {n}" for n in names))
+
+    ritmo = user.get("ritmo", {})
+    if ritmo:
+        parts = [f"{k}: {v}" for k, v in ritmo.items() if v]
+        if parts: sections.append("⏰ Ritmo\n" + "\n".join(f"  • {p}" for p in parts))
+
+    hechos = user.get("hechos", [])
+    if hechos:
+        sections.append("📝 Notas sueltas\n" + "\n".join(f"  • {h}" for h in hechos[-5:]))
+
+    if sections:
+        msg = "🧠 Lo que sé de ti:\n\n" + "\n\n".join(sections)
     else:
-        facts_list = "\n".join(f"• {f}" for f in facts)
-        await update.message.reply_text(f"Esto es lo que sé sobre ti:\n\n{facts_list}")
+        msg = "Aún no sé mucho de ti. Usa /start para hacer la entrevista inicial."
+
+    await update.message.reply_text(msg)
 
 
 async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):

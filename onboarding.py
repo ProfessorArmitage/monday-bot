@@ -1,0 +1,282 @@
+"""
+onboarding.py — Entrevista inicial para conocer al usuario.
+
+Flujo conversacional en pasos. Cada paso hace una pregunta,
+procesa la respuesta con Groq para extraer datos estructurados,
+y los guarda en la categoría correcta de memoria vertical.
+
+Pasos:
+  1. nombre y ubicación
+  2. trabajo / rol
+  3. proyectos activos
+  4. personas clave
+  5. metas actuales
+  6. ritmo preferido (horario de briefing, días libres)
+  7. preferencias de tono
+  8. hooks — qué eventos quiere que el bot monitoree
+  (9. conectar Google — opcional, se sugiere al final)
+"""
+
+import json
+import logging
+import memory
+
+logger = logging.getLogger(__name__)
+
+# ── Definición de pasos ───────────────────────────────────────
+
+STEPS = [
+    {
+        "id": "nombre",
+        "categoria": "identidad",
+        "pregunta": (
+            "¡Hola! Soy tu asistente personal. Antes de empezar, quiero conocerte un poco "
+            "para poder ayudarte mejor.\n\n"
+            "¿Cómo te llamas y desde qué ciudad me escribes? 😊"
+        ),
+        "extractor": """
+Extrae del texto: nombre de la persona y ciudad/país.
+Responde SOLO con JSON, sin texto extra:
+{"nombre": "...", "ubicacion": "...", "idioma": "español"}
+Si no menciona ciudad, usa null.
+""",
+    },
+    {
+        "id": "trabajo",
+        "categoria": "trabajo",
+        "pregunta": (
+            "¿A qué te dedicas? Cuéntame un poco sobre tu trabajo o proyecto principal — "
+            "empresa, rol, en qué estás enfocado ahorita."
+        ),
+        "extractor": """
+Extrae: empresa, rol/cargo, área o equipo, descripción breve del trabajo.
+Responde SOLO con JSON:
+{"empresa": "...", "rol": "...", "equipo": "...", "descripcion": "..."}
+Usa null para lo que no se mencione.
+""",
+    },
+    {
+        "id": "proyectos",
+        "categoria": "proyectos",
+        "pregunta": (
+            "¿Cuáles son los 2 o 3 proyectos o prioridades más importantes en los que "
+            "estás trabajando ahora mismo?"
+        ),
+        "extractor": """
+Extrae una lista de proyectos o prioridades activas.
+Responde SOLO con JSON (array):
+[{"nombre": "...", "descripcion": "...", "estado": "activo"}]
+""",
+    },
+    {
+        "id": "relaciones",
+        "categoria": "relaciones",
+        "pregunta": (
+            "¿Quiénes son las personas más importantes en tu día a día? "
+            "Por ejemplo: tu jefe, clientes clave, equipo, familia — "
+            "las personas con quienes más interactúas o que más importan para tu trabajo."
+        ),
+        "extractor": """
+Extrae personas clave mencionadas con su relación o rol.
+Responde SOLO con JSON (array):
+[{"nombre": "...", "relacion": "jefe|cliente|colega|familia|otro", "notas": "..."}]
+""",
+    },
+    {
+        "id": "metas",
+        "categoria": "metas",
+        "pregunta": (
+            "¿Cuál es tu meta más importante esta semana? "
+            "Y si tienes claro algo más grande que quieras lograr este mes o este año, "
+            "cuéntame también."
+        ),
+        "extractor": """
+Extrae metas por horizonte de tiempo.
+Responde SOLO con JSON:
+{"semana": "...", "mes": "...", "anio": "..."}
+Usa null para lo que no se mencione.
+""",
+    },
+    {
+        "id": "ritmo",
+        "categoria": "ritmo",
+        "pregunta": (
+            "Ayúdame a entender tu ritmo. ¿A qué hora sueles empezar tu día de trabajo? "
+            "¿Tienes días de descanso fijos? ¿A qué hora prefieres recibir tu resumen diario?"
+        ),
+        "extractor": """
+Extrae información sobre el ritmo y horarios del usuario.
+Responde SOLO con JSON:
+{
+  "inicio_dia": "HH:MM",
+  "fin_dia": "HH:MM",
+  "briefing_hora": "HH:MM",
+  "dias_libres": ["sábado", "domingo"],
+  "zona_horaria": "America/Mexico_City"
+}
+Infiere la zona horaria si mencionó su ciudad. Usa null para lo que no se mencione.
+""",
+    },
+    {
+        "id": "preferencias",
+        "categoria": "preferencias",
+        "pregunta": (
+            "Casi terminamos. ¿Cómo prefieres que me comunique contigo? "
+            "¿Respuestas cortas y directas, o más detalladas? "
+            "¿Formal o informal? ¿Hay algo más que deba saber sobre cómo ayudarte mejor?"
+        ),
+        "extractor": """
+Extrae preferencias de comunicación.
+Responde SOLO con JSON:
+{
+  "tono": "formal|informal|casual",
+  "formato": "conciso|detallado",
+  "notas": "..."
+}
+""",
+    },
+    {
+        "id": "hooks",
+        "categoria": "preferencias",
+        "pregunta": (
+            "Por último — ¿qué eventos o situaciones quieres que monitoree para avisarte "
+            "automáticamente? Por ejemplo:\n\n"
+            "• Correos de personas específicas\n"
+            "• Reuniones próximas en tu calendario\n"
+            "• Palabras clave en correos (urgente, factura, contrato...)\n\n"
+            "Dime qué es importante que no se te escape."
+        ),
+        "extractor": """
+Extrae una lista de hooks/alertas que el usuario quiere monitorear.
+Responde SOLO con JSON (array):
+[
+  {"tipo": "correo_remitente|correo_keyword|evento_proximo|otro",
+   "valor": "...",
+   "descripcion": "..."}
+]
+""",
+    },
+]
+
+
+def get_current_step(user_id: int) -> dict | None:
+    """Devuelve el paso actual del onboarding, o None si terminó."""
+    state = memory.get_onboarding_state(user_id)
+    step_index = state.get("step", 0)
+    if step_index >= len(STEPS):
+        return None
+    return {**STEPS[step_index], "index": step_index, "total": len(STEPS)}
+
+
+def get_first_question(user_id: int) -> str:
+    """Devuelve la primera pregunta del onboarding."""
+    memory.set_onboarding_state(user_id, {"step": 0})
+    return STEPS[0]["pregunta"]
+
+
+async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
+    """
+    Procesa la respuesta del usuario al paso actual:
+    1. Extrae datos estructurados con Groq
+    2. Los guarda en la categoría de memoria correcta
+    3. Avanza al siguiente paso o termina el onboarding
+
+    Devuelve la siguiente pregunta o el mensaje de bienvenida final.
+    """
+    state = memory.get_onboarding_state(user_id)
+    step_index = state.get("step", 0)
+
+    if step_index >= len(STEPS):
+        return None  # ya terminó
+
+    step = STEPS[step_index]
+
+    # Extraer datos estructurados con Groq
+    try:
+        extraction_prompt = (
+            f"El usuario respondió lo siguiente a la pregunta '{step['pregunta']}':\n\n"
+            f"\"{answer}\"\n\n"
+            f"{step['extractor']}\n"
+            "Responde SOLO con el JSON, sin texto adicional, sin backticks."
+        )
+        raw = await call_groq_fn(
+            system_prompt="Eres un extractor de información. Responde SOLO con JSON válido.",
+            history=[],
+            user_text=extraction_prompt
+        )
+        # Limpiar y parsear JSON
+        raw = raw.strip().strip("```json").strip("```").strip()
+        extracted = json.loads(raw)
+
+        # Guardar en la categoría correcta
+        categoria = step["categoria"]
+        if step["id"] in ("proyectos", "relaciones"):
+            # Son listas — agregar cada elemento
+            if isinstance(extracted, list):
+                for item in extracted:
+                    memory.add_to_category(user_id, categoria, item)
+            else:
+                memory.add_to_category(user_id, categoria, extracted)
+        elif step["id"] == "hooks":
+            # Guardar hooks en preferencias
+            current = memory.get_category(user_id, "preferencias")
+            current["hooks"] = extracted
+            memory.set_category(user_id, "preferencias", current)
+        else:
+            # Son dicts — merge con lo existente
+            # Filtrar nulls
+            clean = {k: v for k, v in extracted.items() if v is not None}
+            memory.update_category(user_id, categoria, clean)
+
+            # Si extrajimos el nombre, también guardarlo en identidad
+            if step["id"] == "nombre" and "nombre" in clean:
+                pass  # ya se guardó en identidad
+
+    except Exception as e:
+        logger.warning(f"Error extrayendo datos del paso {step['id']}: {e}")
+        # Guardar respuesta raw como hecho si falla el parsing
+        memory.add_fact(user_id, f"{step['id']}: {answer[:200]}")
+
+    # Avanzar al siguiente paso
+    next_index = step_index + 1
+    memory.set_onboarding_state(user_id, {"step": next_index})
+
+    if next_index >= len(STEPS):
+        # Onboarding completo
+        memory.complete_onboarding(user_id)
+        return _build_completion_message(user_id)
+
+    # Devolver siguiente pregunta con progreso
+    next_step = STEPS[next_index]
+    progress = f"({next_index + 1}/{len(STEPS)})"
+    return f"{progress} {next_step['pregunta']}"
+
+
+def _build_completion_message(user_id: int) -> str:
+    """Mensaje final de bienvenida tras completar el onboarding."""
+    user = memory.get_user(user_id)
+    nombre = user.get("identidad", {}).get("nombre", "")
+    nombre_str = f", {nombre}" if nombre else ""
+    ritmo = user.get("ritmo", {})
+    briefing = ritmo.get("briefing_hora", "7:00")
+
+    return (
+        f"¡Perfecto{nombre_str}! Ya te conozco mucho mejor 🎉\n\n"
+        f"Aquí está lo que configuré para ti:\n\n"
+        f"📋 Memoria organizada en: trabajo, proyectos, metas, relaciones y ritmo\n"
+        f"⏰ Briefing diario a las {briefing}\n"
+        f"🔔 Monitoreo de eventos y correos según tus alertas\n\n"
+        f"El siguiente paso es conectar tu Google para activar "
+        f"el calendario, correos y documentos:\n\n"
+        f"👉 /conectar_google\n\n"
+        f"O si prefieres, simplemente escríbeme lo que necesites. "
+        f"¡Estoy listo para trabajar contigo! 💪"
+    )
+
+
+def is_in_onboarding(user_id: int) -> bool:
+    """True si el usuario está actualmente en proceso de onboarding."""
+    if not memory.is_new_user(user_id):
+        return False
+    state = memory.get_onboarding_state(user_id)
+    return "step" in state

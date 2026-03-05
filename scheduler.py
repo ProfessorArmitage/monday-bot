@@ -41,27 +41,10 @@ async def send_to_user(user_id: int, text: str):
 
 
 async def get_all_google_users() -> list[int]:
-    """Devuelve los user_ids de todos los usuarios con Google conectado."""
-    import psycopg2
-    import os
-    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    with conn.cursor() as cur:
-        cur.execute("SELECT user_id FROM users WHERE google_tokens IS NOT NULL")
-        rows = cur.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
-
+    return memory.get_all_google_users()
 
 async def get_all_users() -> list[int]:
-    """Devuelve todos los user_ids registrados."""
-    import psycopg2
-    import os
-    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    with conn.cursor() as cur:
-        cur.execute("SELECT user_id FROM users")
-        rows = cur.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
+    return memory.get_all_users()
 
 
 # ── HEARTBEAT ─────────────────────────────────────────────────
@@ -115,20 +98,29 @@ async def heartbeat(single_user: int = None):
 
 async def morning_briefing():
     """
-    Corre todos los días a las 7:00am (hora México).
-    Manda un resumen personalizado con:
-    - Agenda del día
-    - Correos importantes recientes
-    - Saludo personalizado con IA
+    Corre a las 7, 8 y 9am. Cada usuario recibe su briefing
+    solo en la hora más cercana a la que configuró en su ritmo.
     """
     logger.info("🌅 Enviando briefing matutino...")
 
+    current_hour = datetime.now().hour
     users = await get_all_google_users()
     today = datetime.now().strftime("%A %d de %B")
 
     for user_id in users:
         try:
-            sections = [f"🌅 *Buenos días! Aquí tu briefing del {today}*\n"]
+            # Verificar si este usuario quiere el briefing en esta hora
+            user = memory.get_user(user_id)
+            ritmo = user.get("ritmo", {})
+            preferred = ritmo.get("briefing_hora", "07:00")
+            try:
+                preferred_hour = int(preferred.split(":")[0])
+            except Exception:
+                preferred_hour = 7
+            if preferred_hour != current_hour:
+                continue  # no es su hora
+
+            sections = [f"🌅 Buenos días! Aquí tu briefing del {today}*\n"]
 
             # Agenda del día
             events = await google_services.get_upcoming_events(user_id, max_results=5, days=1)
@@ -233,11 +225,23 @@ def start_scheduler() -> AsyncIOScheduler:
     # Heartbeat cada 30 minutos
     scheduler.add_job(heartbeat, "interval", minutes=30, id="heartbeat")
 
-    # Briefing matutino todos los días a las 7:00am
+    # Briefing matutino todos los días a las 7:00am (hora por defecto)
+    # Cada usuario puede tener su hora en ritmo.briefing_hora — 
+    # el scheduler usa 7am como base; la función verifica el ritmo individual
     scheduler.add_job(
         morning_briefing,
         CronTrigger(hour=7, minute=0, timezone="America/Mexico_City"),
-        id="morning_briefing"
+        id="morning_briefing_0700"
+    )
+    scheduler.add_job(
+        morning_briefing,
+        CronTrigger(hour=8, minute=0, timezone="America/Mexico_City"),
+        id="morning_briefing_0800"
+    )
+    scheduler.add_job(
+        morning_briefing,
+        CronTrigger(hour=9, minute=0, timezone="America/Mexico_City"),
+        id="morning_briefing_0900"
     )
 
     # Resumen semanal los lunes a las 8:00am
