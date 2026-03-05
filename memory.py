@@ -66,7 +66,11 @@ def _init_db():
                     skills            JSONB NOT NULL DEFAULT '[]',
                     -- Metadata
                     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-                    last_seen         TIMESTAMP NOT NULL DEFAULT NOW()
+                    last_seen         TIMESTAMP NOT NULL DEFAULT NOW(),
+                    -- Reprovisión
+                    bot_version       TEXT NOT NULL DEFAULT '0.0.0',
+                    last_reprovisioned TIMESTAMP DEFAULT NULL,
+                    system_overrides  JSONB NOT NULL DEFAULT '{}'
                 )
             """)
             # Migraciones para tablas existentes
@@ -87,6 +91,9 @@ def _init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP NOT NULL DEFAULT NOW()",
                 # Migrar facts → hechos si existe la columna vieja
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS hechos JSONB NOT NULL DEFAULT '[]'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_version TEXT NOT NULL DEFAULT '0.0.0'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reprovisioned TIMESTAMP DEFAULT NULL",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_overrides JSONB NOT NULL DEFAULT '{}'",
             ]
             for sql in migrations:
                 try:
@@ -380,6 +387,46 @@ def remove_skill(user_id: int, skill_id: str):
             cur.execute(
                 "UPDATE users SET skills = %s WHERE user_id = %s",
                 (json.dumps(skills), user_id)
+            )
+            conn.commit()
+
+
+
+# ── Versión y reprovisión ─────────────────────────────────────
+
+def get_bot_version(user_id: int) -> str:
+    """Devuelve la versión del bot que tiene este usuario."""
+    user = get_user(user_id)
+    return user.get("bot_version", "0.0.0")
+
+
+def set_bot_version(user_id: int, version: str):
+    """Actualiza la versión del bot para este usuario."""
+    from datetime import datetime
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET bot_version = %s, last_reprovisioned = %s WHERE user_id = %s",
+                (version, datetime.now(), user_id)
+            )
+            conn.commit()
+
+
+def get_system_overrides(user_id: int) -> dict:
+    """Devuelve los overrides de sistema del usuario (personalización avanzada)."""
+    return get_user(user_id).get("system_overrides", {})
+
+
+def set_system_override(user_id: int, key: str, value):
+    """Guarda un override de sistema para este usuario."""
+    import json
+    overrides = get_system_overrides(user_id)
+    overrides[key] = value
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET system_overrides = %s WHERE user_id = %s",
+                (json.dumps(overrides), user_id)
             )
             conn.commit()
 

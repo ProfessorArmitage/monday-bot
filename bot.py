@@ -35,9 +35,8 @@ import google_services
 import onboarding
 import workspace_memory
 import conversation_context
-import skills as skills_module
+import provisioning
 from scheduler import start_scheduler, init_scheduler
-import google_services
 
 # ── Configuración ────────────────────────────────────────────
 load_dotenv()
@@ -62,39 +61,8 @@ logger = logging.getLogger(__name__)
 telegram_app = None
 
 # ── Prompt base ───────────────────────────────────────────────
-BASE_SYSTEM_PROMPT = """Eres un asistente personal inteligente con acceso a Google Workspace.
-
-Puedes ayudar con:
-- 📅 Google Calendar: agendar, consultar y eliminar eventos
-- 📧 Gmail: leer, buscar y enviar correos
-- 📄 Google Docs: crear y consultar documentos
-- 📊 Google Sheets: crear hojas y registrar datos
-- 💾 Google Drive: buscar y listar archivos
-
-Reglas:
-1. Responde siempre en el idioma del usuario.
-2. Cuando el usuario quiera realizar una acción de Google Workspace, responde con un bloque
-   JSON especial al FINAL de tu mensaje con este formato exacto:
-   [ACTION: {"service": "calendar|gmail|docs|sheets|drive", "action": "nombre_accion", "params": {...}}]
-3. Si el usuario no ha conectado Google, dile que use /conectar_google.
-4. Recuerda siempre lo que sabes del usuario y personaliza tus respuestas.
-5. Sé conciso y útil.
-
-Acciones disponibles por servicio:
-- calendar: list_events, create_event, delete_event
-- gmail: list_emails, send_email, get_email
-- docs: create, get_content, append_text
-- sheets: create, read, append, write
-- drive: list_files, search
-
-Ejemplos de [ACTION]:
-[ACTION: {"service": "calendar", "action": "list_events", "params": {"days": 7}}]
-[ACTION: {"service": "gmail", "action": "send_email", "params": {"to": "juan@gmail.com", "subject": "Hola", "body": "¿Cómo estás?"}}]
-[ACTION: {"service": "docs", "action": "create", "params": {"title": "Mi documento", "content": "Contenido inicial"}}]
-
-Al final de tu respuesta, si aprendiste algo nuevo del usuario:
-[FACT: descripción breve]
-"""
+# System prompt cargado desde provisioning.py (versionado)
+BASE_SYSTEM_PROMPT = provisioning.get_current_system_prompt()
 
 
 # ── Llamada a Groq ────────────────────────────────────────────
@@ -548,7 +516,7 @@ async def start_web_server():
 async def cmd_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra el catálogo de skills disponibles."""
     user_id = update.effective_user.id
-    catalog = skills_module.get_skills_catalog()
+    catalog = provisioning.get_skills_catalog_text()
     active = memory.get_skills(user_id)
     active_names = [s["name"] for s in active]
 
@@ -574,7 +542,7 @@ async def cmd_activate_skill(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    skill = skills_module.find_skill_by_name(name)
+    skill = provisioning.find_skill_by_name(name)
     if not skill:
         await update.message.reply_text(
             f"No encontre una skill llamada '{name}'.\n"
@@ -593,7 +561,7 @@ async def cmd_deactivate_skill(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     name = " ".join(context.args) if context.args else ""
 
-    skill = skills_module.find_skill_by_name(name)
+    skill = provisioning.find_skill_by_name(name)
     if not skill:
         await update.message.reply_text("No encontre esa skill. Usa /skills para ver las activas.")
         return
@@ -647,6 +615,27 @@ async def cmd_sync_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra la versión actual del bot y cuándo se actualizó."""
+    user_id = update.effective_user.id
+    user_version = memory.get_bot_version(user_id)
+    user = memory.get_user(user_id)
+    last_reprov = user.get("last_reprovisioned")
+    last_str = str(last_reprov)[:16] if last_reprov else "nunca"
+
+    msg = (
+        f"Bot v{provisioning.MANIFEST_VERSION} (sistema)\n"
+        f"Tu versión: v{user_version}\n"
+        f"Última actualización: {last_str}\n\n"
+    )
+    if user_version != provisioning.MANIFEST_VERSION:
+        msg += "Hay una actualización pendiente — se aplicará automáticamente."
+    else:
+        msg += "Estás en la versión más reciente."
+
+    await update.message.reply_text(msg)
+
+
 # ── Arrancar todo ─────────────────────────────────────────────
 async def main():
     global telegram_app
@@ -666,15 +655,24 @@ async def main():
     telegram_app.add_handler(CommandHandler("heartbeat",        cmd_heartbeat_test))
     telegram_app.add_handler(CommandHandler("mi_doc",    cmd_my_doc))
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
+    telegram_app.add_handler(CommandHandler("version", cmd_version))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Iniciar servidor web y bot en paralelo
     await start_web_server()
 
+    # Arrancar scheduler (heartbeat, briefing, ritmo semanal, reprovisión)
+    init_scheduler(telegram_app.bot, call_groq)
+    start_scheduler()
+
     logger.info("✅ Bot iniciado. Esperando mensajes...")
 
     async with telegram_app:
         await telegram_app.start()
+
+        # Reprovisión al arrancar: actualizar usuarios con versión vieja
+        asyncio.create_task(provisioning.run_reprovisioning(memory, telegram_app.bot))
+
         await telegram_app.updater.start_polling()
         await asyncio.Event().wait()
 

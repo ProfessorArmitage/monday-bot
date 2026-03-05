@@ -16,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 import memory
 import google_services
 import workspace_memory
+import provisioning
 import google_auth
 
 logger = logging.getLogger(__name__)
@@ -309,6 +310,20 @@ async def nightly_doc_sync():
             logger.error(f"Error en sync nocturno para {user_id}: {e}")
 
 
+async def weekly_reprovisioning():
+    """
+    Corre cada domingo a las 3am.
+    Aplica reprovisión a todos los usuarios que tienen versión desactualizada.
+    También corre automáticamente al arrancar el bot (ver main() en bot.py).
+    """
+    logger.info("🔄 Ejecutando reprovisión semanal...")
+    stats = await provisioning.run_reprovisioning(memory, _bot)
+    logger.info(
+        f"Reprovisión completada: {stats['actualizados']} actualizados, "
+        f"{stats['errores']} errores de {stats['total']} usuarios"
+    )
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """
     Crea y arranca el scheduler con todas las tareas.
@@ -357,6 +372,13 @@ def start_scheduler() -> AsyncIOScheduler:
         nightly_doc_sync,
         CronTrigger(hour=2, minute=0, timezone="America/Mexico_City"),
         id="nightly_doc_sync"
+    )
+
+    # Reprovisión semanal: cada domingo a las 3am
+    scheduler.add_job(
+        weekly_reprovisioning,
+        CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="America/Mexico_City"),
+        id="weekly_reprovisioning"
     )
 
     scheduler.start()
