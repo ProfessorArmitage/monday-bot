@@ -629,6 +629,10 @@ no usa offsets hardcodeados. Respeta automáticamente el cambio de horario de ve
 3. Agregar entrada al CHANGELOG
 4. git push
 ```
+> ⚠️ **Regla explícita:** Cualquier cambio en `SYSTEM_PROMPT` —
+> por pequeño que sea— requiere bump MINOR + entrada en CHANGELOG.
+> Sin esto, los usuarios existentes no son notificados y su `bot_version`
+> queda desincronizada con el comportamiento real del asistente.
 
 **Tipo B — Agregar skill al catálogo:**
 ```
