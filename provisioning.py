@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.2.0"
+MANIFEST_VERSION = "1.2.1"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -67,6 +67,15 @@ CHANGELOG = {
             "Nuevo comando /mis_skills para ver tus skills activas y su estado",
         ],
         "accion_requerida": "Prueba /mis_skills para ver tus skills actuales y /nueva_skill para crear una propia",
+    },
+    "1.2.1": {
+        "titulo": "Timezone por usuario — corrección de horarios",
+        "cambios": [
+            "Los eventos del calendario ahora se crean en tu timezone real",
+            "Nuevo comando /mi_zona para ver y corregir tu zona horaria",
+            "Auto-detección de timezone desde tu Google Calendar si no está configurada",
+        ],
+        "accion_requerida": "Si tus eventos aparecen con hora incorrecta, usa /mi_zona para corregirla",
     },
     # Ejemplo de cómo agregar la próxima versión:
     # "1.1.0": {

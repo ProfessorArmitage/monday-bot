@@ -55,10 +55,37 @@ async def create_event(user_id: int, title: str = "", start: str = "", end: str 
     """
     token = await get_valid_token(user_id)
 
-    # Resolver timezone del usuario o usar default
+    # Resolver timezone del usuario — prioritad: param > DB > Google Calendar > default
     import memory as _mem
     user = _mem.get_user(user_id)
-    tz = timezone or user.get("ritmo", {}).get("zona_horaria", "America/Mexico_City")
+    stored_tz = user.get("ritmo", {}).get("zona_horaria")
+    tz = timezone or stored_tz or None
+
+    # Si no hay tz en DB, intentar inferir del propio Google Calendar del usuario
+    if not tz:
+        try:
+            token_check = await get_valid_token(user_id)
+            async with httpx.AsyncClient() as _c:
+                _r = await _c.get(
+                    "https://www.googleapis.com/calendar/v3/calendars/primary",
+                    headers={"Authorization": f"Bearer {token_check}"}
+                )
+                if _r.status_code == 200:
+                    cal_tz = _r.json().get("timeZone")
+                    if cal_tz:
+                        tz = cal_tz
+                        # Guardarlo para la próxima vez
+                        ritmo = user.get("ritmo", {})
+                        ritmo["zona_horaria"] = cal_tz
+                        _mem.set_category(user_id, "ritmo", ritmo)
+                        import logging
+                        logging.getLogger(__name__).info(
+                            f"Timezone detectada de Google Calendar: {cal_tz} para user {user_id}"
+                        )
+        except Exception:
+            pass
+
+    tz = tz or "America/Mexico_City"  # último fallback
 
     # Normalizar fechas usando tz_utils (respeta DST automáticamente)
     start_norm, start_allday = tz_utils.normalize_datetime_for_calendar(start, tz)

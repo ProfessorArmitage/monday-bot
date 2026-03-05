@@ -884,6 +884,75 @@ async def cmd_mi_asistente(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_mi_zona(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ver o cambiar la timezone del usuario.
+    Uso:
+      /mi_zona                      → ver timezone actual
+      /mi_zona America/Los_Angeles  → setear timezone IANA directamente
+      /mi_zona Los Angeles          → setear por ciudad (inferencia automática)
+    """
+    user_id = update.effective_user.id
+    args = " ".join(context.args).strip() if context.args else ""
+
+    if not args:
+        user = memory.get_user(user_id)
+        tz_name = user.get("ritmo", {}).get("zona_horaria") or "No configurada"
+        user_now = tz_utils.now_for_user(user)
+        offset = tz_utils.get_iso_offset(tz_name) if tz_name != "No configurada" else "?"
+        await update.message.reply_text(
+            f"🕐 Tu timezone: {tz_name}\n"
+            f"   Offset actual: {offset}\n"
+            f"   Tu hora local: {user_now.strftime('%H:%M')}\n\n"
+            "Para cambiarla:\n"
+            "/mi_zona Los Angeles\n"
+            "/mi_zona America/Bogota\n"
+            "/mi_zona Madrid"
+        )
+        return
+
+    # Intentar inferir por ciudad primero
+    inferred = tz_utils.infer_tz_from_city(args)
+
+    # Si no, intentar como nombre IANA directo
+    if not inferred:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(args)
+            inferred = args
+        except (ZoneInfoNotFoundError, Exception):
+            pass
+
+    if not inferred:
+        await update.message.reply_text(
+            f"No reconocí '{args}' como ciudad o timezone.\n\n"
+            "Prueba con el nombre IANA directo, por ejemplo:\n"
+            "• America/Los_Angeles\n"
+            "• America/New_York\n"
+            "• America/Bogota\n"
+            "• Europe/Madrid\n\n"
+            "O con el nombre de tu ciudad en español o inglés."
+        )
+        return
+
+    # Guardar
+    ritmo = memory.get_category(user_id, "ritmo") or {}
+    ritmo["zona_horaria"] = inferred
+    memory.set_category(user_id, "ritmo", ritmo)
+
+    offset = tz_utils.get_iso_offset(inferred)
+    from datetime import datetime
+    local_now = datetime.now(tz_utils.get_zoneinfo(inferred))
+
+    await update.message.reply_text(
+        f"✅ Timezone actualizada: *{inferred}*\n"
+        f"   Offset: {offset}\n"
+        f"   Tu hora ahora: {local_now.strftime('%H:%M')}\n\n"
+        "Todos los eventos del calendario se crearán con esta zona horaria.",
+        parse_mode="Markdown"
+    )
+
+
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la versión actual del bot y cuándo se actualizó."""
     user_id = update.effective_user.id
@@ -925,6 +994,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("mi_doc",    cmd_my_doc))
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(CommandHandler("version", cmd_version))
+    telegram_app.add_handler(CommandHandler("mi_zona", cmd_mi_zona))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))
     telegram_app.add_handler(CommandHandler("nueva_skill", cmd_nueva_skill))
