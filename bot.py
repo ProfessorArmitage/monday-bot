@@ -18,7 +18,8 @@ import logging
 import asyncio
 import httpx
 from aiohttp import web
-from dotenv import load_dotenv
+# Nota: no se usa load_dotenv() — las variables de entorno las provee
+# Railway en producción y el shell en local. El .env es solo referencia.
 
 from telegram import Update
 from telegram.ext import (
@@ -41,8 +42,6 @@ import skills as skills_engine
 from scheduler import start_scheduler, init_scheduler
 
 # ── Configuración ────────────────────────────────────────────
-load_dotenv()
-
 TELEGRAM_TOKEN     = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY")
 RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "http://localhost:8080")
