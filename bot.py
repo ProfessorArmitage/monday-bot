@@ -32,6 +32,8 @@ from telegram.ext import (
 import memory
 import google_auth
 import google_services
+import skills as skills_module
+from scheduler import start_scheduler, init_scheduler
 import google_services
 
 # ── Configuración ────────────────────────────────────────────

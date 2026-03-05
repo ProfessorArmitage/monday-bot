@@ -185,3 +185,55 @@ def get_google_tokens(user_id: int) -> dict | None:
 def has_google_connected(user_id: int) -> bool:
     """Devuelve True si el usuario ya conectó su cuenta de Google."""
     return get_google_tokens(user_id) is not None
+
+
+# ── Skills por usuario ────────────────────────────────────────
+
+def _ensure_skills_column():
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS skills JSONB DEFAULT '[]'
+            """)
+            conn.commit()
+
+_ensure_skills_column()
+
+
+def get_skills(user_id: int) -> list:
+    """Devuelve las skills activas del usuario."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT skills FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row and row[0] else []
+
+
+def save_skill(user_id: int, skill: dict):
+    """Agrega o reemplaza una skill del usuario."""
+    import json
+    skills = get_skills(user_id)
+    # Reemplazar si ya existe por ID
+    skills = [s for s in skills if s.get("id") != skill.get("id")]
+    skills.append(skill)
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET skills = %s WHERE user_id = %s",
+                (json.dumps(skills), user_id)
+            )
+            conn.commit()
+
+
+def remove_skill(user_id: int, skill_id: str):
+    """Elimina una skill del usuario."""
+    import json
+    skills = [s for s in get_skills(user_id) if s.get("id") != skill_id]
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET skills = %s WHERE user_id = %s",
+                (json.dumps(skills), user_id)
+            )
+            conn.commit()
