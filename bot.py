@@ -438,6 +438,74 @@ async def start_web_server():
     logger.info(f"✅ Servidor OAuth iniciado en puerto {PORT}")
 
 
+
+# ── Comandos de Skills y Heartbeat ───────────────────────────
+async def cmd_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el catálogo de skills disponibles."""
+    user_id = update.effective_user.id
+    catalog = skills_module.get_skills_catalog()
+    active = memory.get_skills(user_id)
+    active_names = [s["name"] for s in active]
+
+    msg = catalog
+    if active_names:
+        msg += f"\n\nTus skills activas: {', '.join(active_names)}"
+    else:
+        msg += "\n\nNo tienes skills activas. Usa /activar_skill [nombre] para activar una."
+
+    await update.message.reply_text(msg)
+
+
+async def cmd_activate_skill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Activa una skill. Uso: /activar_skill correo formal"""
+    user_id = update.effective_user.id
+    name = " ".join(context.args) if context.args else ""
+
+    if not name:
+        await update.message.reply_text(
+            "Uso: /activar_skill [nombre]\n"
+            "Ejemplo: /activar_skill correo formal\n\n"
+            "Mira el catalogo con /skills"
+        )
+        return
+
+    skill = skills_module.find_skill_by_name(name)
+    if not skill:
+        await update.message.reply_text(
+            f"No encontre una skill llamada '{name}'.\n"
+            "Usa /skills para ver las disponibles."
+        )
+        return
+
+    memory.save_skill(user_id, skill)
+    await update.message.reply_text(
+        f"{skill['emoji']} Skill {skill['name']} activada.\n{skill['description']}"
+    )
+
+
+async def cmd_deactivate_skill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Desactiva una skill. Uso: /desactivar_skill correo formal"""
+    user_id = update.effective_user.id
+    name = " ".join(context.args) if context.args else ""
+
+    skill = skills_module.find_skill_by_name(name)
+    if not skill:
+        await update.message.reply_text("No encontre esa skill. Usa /skills para ver las activas.")
+        return
+
+    memory.remove_skill(user_id, skill["id"])
+    await update.message.reply_text(f"Skill {skill['name']} desactivada.")
+
+
+async def cmd_heartbeat_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prueba manual del heartbeat."""
+    from scheduler import heartbeat
+    user_id = update.effective_user.id
+    await update.message.reply_text("Ejecutando heartbeat manual, espera un momento...")
+    await heartbeat(single_user=user_id)
+    await update.message.reply_text("Heartbeat completado. Si no hubo alertas, todo esta en orden.")
+
+
 # ── Arrancar todo ─────────────────────────────────────────────
 async def main():
     global telegram_app
@@ -451,6 +519,10 @@ async def main():
     telegram_app.add_handler(CommandHandler("memoria",            cmd_memory))
     telegram_app.add_handler(CommandHandler("olvidar",            cmd_forget))
     telegram_app.add_handler(CommandHandler("ayuda",              cmd_help))
+    telegram_app.add_handler(CommandHandler("skills",           cmd_skills))
+    telegram_app.add_handler(CommandHandler("activar_skill",    cmd_activate_skill))
+    telegram_app.add_handler(CommandHandler("desactivar_skill", cmd_deactivate_skill))
+    telegram_app.add_handler(CommandHandler("heartbeat",        cmd_heartbeat_test))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Iniciar servidor web y bot en paralelo
