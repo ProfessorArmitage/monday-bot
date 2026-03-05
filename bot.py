@@ -33,6 +33,7 @@ import memory
 import google_auth
 import google_services
 import onboarding
+import workspace_memory
 import skills as skills_module
 from scheduler import start_scheduler, init_scheduler
 import google_services
@@ -257,6 +258,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if next_question:
             await update.message.reply_text(next_question)
+            # Si onboarding terminó y tiene Google, sincronizar al doc
+            if not onboarding.is_in_onboarding(user_id) and memory.has_google_connected(user_id):
+                import asyncio
+                asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
         return
     # ─────────────────────────────────────────────────────────
     user_id   = update.effective_user.id
@@ -269,6 +274,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     google_status = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado (usa /conectar_google)"
     system_prompt = memory.build_system_prompt(user_id, BASE_SYSTEM_PROMPT)
     system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
+
+    # Bootstrap: si el usuario ya tiene Google y no tiene doc todavía, crearlo
+    if memory.has_google_connected(user_id):
+        import asyncio
+        asyncio.create_task(workspace_memory.bootstrap_existing_user(user_id))
+
+    # Leer memoria extendida del Google Doc (en background, sin bloquear)
+    if memory.has_google_connected(user_id):
+        try:
+            doc_content = await workspace_memory.read_memory_doc(user_id)
+            if doc_content:
+                system_prompt += (
+                    "\n\n=== MEMORIA EXTENDIDA (Google Doc) ===\n"
+                    + doc_content[:3000]
+                    + "\n======================================"
+                )
+        except Exception as _e:
+            logger.warning(f"No se pudo leer workspace doc: {_e}")
 
     hist = memory.get_history(user_id)
     await update.message.chat.send_action("typing")
@@ -294,6 +317,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     facts_found = re.findall(r'\[FACT:\s*(.+?)\]', full_reply)
     for fact in facts_found:
         memory.add_fact(user_id, fact.strip())
+    # Sincronizar al Google Doc cuando se aprende algo nuevo
+    if facts_found and memory.has_google_connected(user_id):
+        import asyncio
+        asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
 
     # Limpiar la respuesta
     clean_reply = re.sub(r'\[ACTION:.*?\]', '', full_reply, flags=re.DOTALL)
@@ -463,6 +490,11 @@ async def oauth_callback(request: web.Request) -> web.Response:
         ).isoformat()
         memory.save_google_tokens(user_id, tokens)
 
+        # Crear documento de memoria en Google Drive
+        import asyncio
+        asyncio.create_task(workspace_memory.get_or_create_memory_doc(user_id))
+        asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
+
         # Notificar al usuario en Telegram
         if telegram_app:
             await telegram_app.bot.send_message(
@@ -562,6 +594,42 @@ async def cmd_heartbeat_test(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("Heartbeat completado. Si no hubo alertas, todo esta en orden.")
 
 
+async def cmd_my_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Envía al usuario el enlace a su Google Doc de memoria."""
+    user_id = update.effective_user.id
+    if not memory.has_google_connected(user_id):
+        await update.message.reply_text("Primero conecta tu Google con /conectar_google")
+        return
+    await update.message.chat.send_action("typing")
+    doc_id = await workspace_memory.get_or_create_memory_doc(user_id)
+    if doc_id:
+        url = f"https://docs.google.com/document/d/{doc_id}"
+        await update.message.reply_text(
+            f"Tu documento de memoria esta aqui:\n{url}\n\n"
+            "Puedes editarlo directamente y tu asistente lo leera en cada conversacion."
+        )
+    else:
+        await update.message.reply_text("No se pudo acceder al documento. Intenta de nuevo.")
+
+
+async def cmd_sync_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sincroniza manualmente la memoria al Google Doc y viceversa."""
+    user_id = update.effective_user.id
+    if not memory.has_google_connected(user_id):
+        await update.message.reply_text("Primero conecta tu Google con /conectar_google")
+        return
+    await update.message.chat.send_action("typing")
+    # Primero leer cambios del doc
+    await workspace_memory.sync_doc_to_memory(user_id)
+    # Luego escribir memoria actualizada
+    await workspace_memory.sync_memory_to_doc(user_id)
+    doc_id = await workspace_memory.get_or_create_memory_doc(user_id)
+    url = f"https://docs.google.com/document/d/{doc_id}" if doc_id else ""
+    await update.message.reply_text(
+        f"Sincronizacion completada.\n{url}"
+    )
+
+
 # ── Arrancar todo ─────────────────────────────────────────────
 async def main():
     global telegram_app
@@ -579,6 +647,8 @@ async def main():
     telegram_app.add_handler(CommandHandler("activar_skill",    cmd_activate_skill))
     telegram_app.add_handler(CommandHandler("desactivar_skill", cmd_deactivate_skill))
     telegram_app.add_handler(CommandHandler("heartbeat",        cmd_heartbeat_test))
+    telegram_app.add_handler(CommandHandler("mi_doc",    cmd_my_doc))
+    telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Iniciar servidor web y bot en paralelo

@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 import memory
 import google_services
+import workspace_memory
 import google_auth
 
 logger = logging.getLogger(__name__)
@@ -215,6 +216,22 @@ async def friday_wrap():
 
 # ── ARRANCAR EL SCHEDULER ─────────────────────────────────────
 
+async def nightly_doc_sync():
+    """
+    Corre cada noche a las 2am.
+    Sincroniza el Google Doc de cada usuario con su memoria vertical.
+    Lee cambios que el usuario haya hecho directamente en el doc.
+    """
+    logger.info("🌙 Sincronización nocturna de workspace docs...")
+    users = await get_all_google_users()
+    for user_id in users:
+        try:
+            await workspace_memory.sync_doc_to_memory(user_id)
+            logger.info(f"Doc sincronizado para usuario {user_id}")
+        except Exception as e:
+            logger.error(f"Error en sync nocturno para {user_id}: {e}")
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """
     Crea y arranca el scheduler con todas las tareas.
@@ -256,6 +273,13 @@ def start_scheduler() -> AsyncIOScheduler:
         friday_wrap,
         CronTrigger(day_of_week="fri", hour=17, minute=0, timezone="America/Mexico_City"),
         id="friday_wrap"
+    )
+
+    # Sincronizar docs de workspace cada noche a las 2am
+    scheduler.add_job(
+        nightly_doc_sync,
+        CronTrigger(hour=2, minute=0, timezone="America/Mexico_City"),
+        id="nightly_doc_sync"
     )
 
     scheduler.start()
