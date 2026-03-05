@@ -70,7 +70,9 @@ def _init_db():
                     -- Reprovisión
                     bot_version       TEXT NOT NULL DEFAULT '0.0.0',
                     last_reprovisioned TIMESTAMP DEFAULT NULL,
-                    system_overrides  JSONB NOT NULL DEFAULT '{}'
+                    system_overrides  JSONB NOT NULL DEFAULT '{}',
+                    -- Identidad personalizada del asistente
+                    bot_identity      JSONB NOT NULL DEFAULT '{}'
                 )
             """)
             # Migraciones para tablas existentes
@@ -94,6 +96,7 @@ def _init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_version TEXT NOT NULL DEFAULT '0.0.0'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reprovisioned TIMESTAMP DEFAULT NULL",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_overrides JSONB NOT NULL DEFAULT '{}'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_identity JSONB NOT NULL DEFAULT '{}'",
             ]
             for sql in migrations:
                 try:
@@ -260,8 +263,15 @@ def build_system_prompt(user_id: int, base_prompt: str) -> str:
     """
     Construye el system prompt completo incluyendo toda la memoria vertical.
     El contexto se organiza por categorías para máxima relevancia.
+    Inyecta la identidad del asistente al inicio del prompt.
     """
+    import identity as identity_module
     user = get_user(user_id)
+
+    # Bloque de identidad — va PRIMERO para que el modelo lo tome como base
+    bot_identity = user.get("bot_identity", {})
+    identity_block = identity_module.build_identity_block(bot_identity)
+    base_with_identity = identity_block + "\n\n" + base_prompt
 
     sections = []
 
@@ -329,7 +339,7 @@ def build_system_prompt(user_id: int, base_prompt: str) -> str:
     else:
         memory_block = "\n\nAún no sabes nada de este usuario — es su primera conversación."
 
-    return base_prompt + memory_block
+    return base_with_identity + memory_block
 
 
 # ── Google OAuth ──────────────────────────────────────────────
@@ -390,6 +400,38 @@ def remove_skill(user_id: int, skill_id: str):
             )
             conn.commit()
 
+
+
+# ── Identidad del asistente por usuario ──────────────────────
+
+def get_bot_identity(user_id: int) -> dict:
+    """Devuelve la identidad personalizada del asistente para este usuario."""
+    return get_user(user_id).get("bot_identity", {})
+
+
+def set_bot_identity(user_id: int, identity: dict):
+    """Guarda la identidad personalizada del asistente para este usuario."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET bot_identity = %s WHERE user_id = %s",
+                (json.dumps(identity), user_id)
+            )
+            conn.commit()
+
+
+def update_bot_identity(user_id: int, **kwargs):
+    """
+    Actualiza campos específicos de la identidad del asistente.
+    Siempre activa la personalización al hacer cualquier cambio.
+    kwargs: nombre, tono, frase
+    """
+    current = get_bot_identity(user_id)
+    for key, value in kwargs.items():
+        if value is not None:
+            current[key] = value
+    current["activa"] = True
+    set_bot_identity(user_id, current)
 
 
 # ── Versión y reprovisión ─────────────────────────────────────

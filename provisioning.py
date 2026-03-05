@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.0.0"
+MANIFEST_VERSION = "1.1.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -47,6 +47,16 @@ CHANGELOG = {
         ],
         "accion_requerida": None,  # None = no se pide nada al usuario
     },
+    "1.1.0": {
+        "titulo": "Identidad propia — conoce a Luma",
+        "cambios": [
+            "Tu asistente ahora tiene nombre y personalidad propia: Luma",
+            "Nuevo comando /mi_asistente para personalizar nombre, tono y trato",
+            "Los saludos son variados y personalizados — ya no son genéricos",
+            "El onboarding ahora incluye un paso para personalizar al asistente",
+        ],
+        "accion_requerida": "Prueba /mi_asistente para personalizar cómo me llamo y cómo te trato",
+    },
     # Ejemplo de cómo agregar la próxima versión:
     # "1.1.0": {
     #     "titulo": "Identidad del asistente + nuevas skills",
@@ -62,7 +72,7 @@ CHANGELOG = {
 # Esta es la fuente de verdad del comportamiento base del bot.
 # Al cambiar esto e incrementar MANIFEST_VERSION, todos los usuarios
 # recibirán el nuevo prompt en su próxima sesión.
-SYSTEM_PROMPT = """Eres un asistente personal inteligente con acceso a Google Workspace.
+SYSTEM_PROMPT = """Tienes acceso a Google Workspace y puedes operar en nombre del usuario.
 
 Puedes ayudar con:
 - 📅 Google Calendar: agendar, consultar y eliminar eventos

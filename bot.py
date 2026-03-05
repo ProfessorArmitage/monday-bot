@@ -36,6 +36,7 @@ import onboarding
 import workspace_memory
 import conversation_context
 import provisioning
+import identity as identity_module
 from scheduler import start_scheduler, init_scheduler
 
 # ── Configuración ────────────────────────────────────────────
@@ -328,21 +329,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Comandos ──────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    name = update.effective_user.first_name or ""
+    tg_name = update.effective_user.first_name or ""
 
     if memory.is_new_user(user_id):
-        # Usuario nuevo — iniciar entrevista de onboarding
+        # Usuario nuevo — saludo con identidad global + arrancar onboarding
+        greeting = identity_module.get_new_user_greeting()
+        await update.message.reply_text(greeting)
         first_question = onboarding.get_first_question(user_id)
         await update.message.reply_text(first_question)
     else:
-        # Usuario conocido — saludo personalizado
+        # Usuario conocido — saludo personalizado con su identidad
         user = memory.get_user(user_id)
-        nombre = user.get("identidad", {}).get("nombre", name)
-        await update.message.reply_text(
-            f"¡Hola de nuevo, {nombre}! 👋\n\n"
-            "¿En qué te puedo ayudar hoy?\n\n"
-            "Usa /ayuda para ver todos los comandos."
-        )
+        nombre = user.get("identidad", {}).get("nombre", tg_name)
+        bot_identity = memory.get_bot_identity(user_id)
+        greeting = identity_module.get_greeting(bot_identity, nombre)
+        await update.message.reply_text(greeting)
 
 
 async def cmd_connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -615,6 +616,77 @@ async def cmd_sync_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_mi_asistente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ver y cambiar la identidad personalizada del asistente.
+
+    Uso:
+      /mi_asistente              → ver configuración actual
+      /mi_asistente nombre Luna  → cambiar nombre
+      /mi_asistente tono casual  → cambiar tono (formal|casual|directo)
+      /mi_asistente frase [texto] → cambiar frase de trato
+      /mi_asistente reset        → volver a identidad global
+    """
+    user_id = update.effective_user.id
+    args = context.args or []
+
+    if not args:
+        # Mostrar configuración actual
+        bot_identity = memory.get_bot_identity(user_id)
+        msg = identity_module.describe_identity(bot_identity)
+        await update.message.reply_text(msg)
+        return
+
+    subcmd = args[0].lower()
+
+    if subcmd == "nombre" and len(args) > 1:
+        nuevo_nombre = " ".join(args[1:])
+        memory.update_bot_identity(user_id, nombre=nuevo_nombre)
+        await update.message.reply_text(
+            f"Listo — a partir de ahora me llamo *{nuevo_nombre}* para ti 😊",
+            parse_mode="Markdown"
+        )
+
+    elif subcmd == "tono" and len(args) > 1:
+        tono = args[1].lower()
+        tonos_validos = ["formal", "casual", "directo"]
+        if tono not in tonos_validos:
+            await update.message.reply_text(
+                f"Tono no reconocido. Opciones: {', '.join(tonos_validos)}"
+            )
+            return
+        memory.update_bot_identity(user_id, tono=tono)
+        await update.message.reply_text(f"Tono actualizado a: *{tono}* ✅", parse_mode="Markdown")
+
+    elif subcmd == "frase" and len(args) > 1:
+        frase = " ".join(args[1:])
+        memory.update_bot_identity(user_id, frase=frase)
+        await update.message.reply_text(
+            f"Perfecto — trataré de ser: "{frase}" ✅"
+        )
+
+    elif subcmd == "reset":
+        memory.set_bot_identity(user_id, {"activa": False})
+        await update.message.reply_text(
+            "Volví a la identidad global (Luma) ✅"
+        )
+
+    else:
+        await update.message.reply_text(
+            "Uso:
+"
+            "/mi_asistente               → ver configuración
+"
+            "/mi_asistente nombre Luna   → cambiar nombre
+"
+            "/mi_asistente tono casual   → formal | casual | directo
+"
+            "/mi_asistente frase [texto] → cómo quieres ser tratado
+"
+            "/mi_asistente reset         → volver a identidad global"
+        )
+
+
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la versión actual del bot y cuándo se actualizó."""
     user_id = update.effective_user.id
@@ -656,6 +728,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("mi_doc",    cmd_my_doc))
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(CommandHandler("version", cmd_version))
+    telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Iniciar servidor web y bot en paralelo

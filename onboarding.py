@@ -139,7 +139,7 @@ Responde SOLO con JSON:
         "id": "hooks",
         "categoria": "preferencias",
         "pregunta": (
-            "Por último — ¿qué eventos o situaciones quieres que monitoree para avisarte "
+            "¿Qué eventos o situaciones quieres que monitoree para avisarte "
             "automáticamente? Por ejemplo:\n\n"
             "• Correos de personas específicas\n"
             "• Reuniones próximas en tu calendario\n"
@@ -154,6 +154,30 @@ Responde SOLO con JSON (array):
    "valor": "...",
    "descripcion": "..."}
 ]
+""",
+    },
+    {
+        "id": "identidad_asistente",
+        "categoria": "_bot_identity",   # categoría especial — no es memoria del usuario
+        "pregunta": (
+            "Una última cosa — quiero saber cómo prefieres que sea yo contigo.\n\n"
+            "Por defecto me llamo Luma. ¿Quieres cambiar mi nombre? "
+            "¿Cómo prefieres que te trate — formal, casual o muy directo?\n\n"
+            "Y si quieres, dime en una frase cómo quieres que sea nuestra relación. "
+            "Por ejemplo: 'trátame como socio de trabajo' o 'sé mi segundo cerebro'.\n\n"
+            "Si te parece bien todo como está, solo di 'así está bien' 😊"
+        ),
+        "extractor": """
+Extrae la personalización del asistente que quiere el usuario.
+Responde SOLO con JSON:
+{
+  "nombre": "nombre que quiere darle al asistente, o null si no quiere cambiarlo",
+  "tono": "formal|casual|directo o null si no especificó",
+  "frase": "la frase de trato en sus propias palabras, o null si no especificó",
+  "activa": true
+}
+Si el usuario dijo algo como "así está bien" o "no cambies nada", devuelve:
+{"nombre": null, "tono": null, "frase": null, "activa": false}
 """,
     },
 ]
@@ -210,7 +234,12 @@ async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
 
         # Guardar en la categoría correcta
         categoria = step["categoria"]
-        if step["id"] in ("proyectos", "relaciones"):
+        if step["id"] == "identidad_asistente":
+            # Personalización del asistente — va a bot_identity, no a memoria personal
+            clean = {k: v for k, v in extracted.items() if v is not None}
+            if clean.get("activa", True):
+                memory.update_bot_identity(user_id, **{k: v for k, v in clean.items() if k != "activa"})
+        elif step["id"] in ("proyectos", "relaciones"):
             # Son listas — agregar cada elemento
             if isinstance(extracted, list):
                 for item in extracted:
@@ -224,13 +253,8 @@ async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
             memory.set_category(user_id, "preferencias", current)
         else:
             # Son dicts — merge con lo existente
-            # Filtrar nulls
             clean = {k: v for k, v in extracted.items() if v is not None}
             memory.update_category(user_id, categoria, clean)
-
-            # Si extrajimos el nombre, también guardarlo en identidad
-            if step["id"] == "nombre" and "nombre" in clean:
-                pass  # ya se guardó en identidad
 
     except Exception as e:
         logger.warning(f"Error extrayendo datos del paso {step['id']}: {e}")
@@ -254,24 +278,29 @@ async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
 
 def _build_completion_message(user_id: int) -> str:
     """Mensaje final de bienvenida tras completar el onboarding."""
+    import identity as identity_module
     user = memory.get_user(user_id)
-    nombre = user.get("identidad", {}).get("nombre", "")
-    nombre_str = f", {nombre}" if nombre else ""
+    nombre_usuario = user.get("identidad", {}).get("nombre", "")
+    nombre_str = f", {nombre_usuario}" if nombre_usuario else ""
     ritmo = user.get("ritmo", {})
     briefing = ritmo.get("briefing_hora", "7:00")
 
+    # Usar el nombre del asistente personalizado
+    bot_identity = memory.get_bot_identity(user_id)
+    bot_nombre = identity_module.get_identity_for_user(bot_identity)["nombre"]
+
     return (
-        f"¡Perfecto{nombre_str}! Ya te conozco mucho mejor 🎉\n\n"
-        f"Aquí está lo que configuré para ti:\n\n"
-        f"📋 Memoria organizada en: trabajo, proyectos, metas, relaciones y ritmo\n"
+        f"¡Listo{nombre_str}! Ya te conozco mucho mejor 🎉\n\n"
+        f"Soy {bot_nombre} y a partir de ahora seré tu asistente personal.\n\n"
+        f"Configuré:\n"
+        f"📋 Tu memoria organizada en categorías\n"
         f"⏰ Briefing diario a las {briefing}\n"
-        f"🔔 Monitoreo de eventos y correos según tus alertas\n\n"
-        f"El siguiente paso es conectar tu Google para activar "
-        f"el calendario, correos y documentos:\n\n"
+        f"🔔 Monitoreo de tus alertas\n\n"
+        f"El siguiente paso es conectar tu Google:\n"
         f"👉 /conectar_google\n\n"
-        f"O si prefieres, simplemente escríbeme lo que necesites. "
-        f"¡Estoy listo para trabajar contigo! 💪"
+        f"O simplemente escríbeme lo que necesitas. ¡Arrancamos! 💪"
     )
+
 
 
 def is_in_onboarding(user_id: int) -> bool:
