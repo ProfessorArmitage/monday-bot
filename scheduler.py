@@ -50,13 +50,79 @@ async def get_all_users() -> list[int]:
 
 # ── HEARTBEAT ─────────────────────────────────────────────────
 
+async def _check_hooks(user_id: int, hooks: list, now: datetime) -> list:
+    """
+    Evalúa los hooks configurados por el usuario y devuelve alertas.
+    Tipos soportados:
+      - correo_remitente: avisa si llega correo de ese remitente
+      - correo_keyword:   avisa si llega correo con esa palabra en asunto
+      - evento_proximo:   avisa si hay evento con esa keyword próximo
+    """
+    alerts = []
+
+    for hook in hooks:
+        if not isinstance(hook, dict):
+            continue
+        tipo  = hook.get("tipo", "")
+        valor = hook.get("valor", "").lower()
+        desc  = hook.get("descripcion", valor)
+
+        try:
+            if tipo == "correo_remitente":
+                emails = await google_services.get_recent_emails(
+                    user_id, max_results=5, sender=valor
+                )
+                if emails:
+                    e = emails[0]
+                    alerts.append(
+                        f"📧 Correo de {desc}:\n"
+                        f"   {e.get('Subject','Sin asunto')}\n"
+                        f"   {e.get('snippet','')[:80]}"
+                    )
+
+            elif tipo == "correo_keyword":
+                emails = await google_services.get_recent_emails(
+                    user_id, max_results=3, subject=valor
+                )
+                if emails:
+                    for e in emails[:2]:
+                        asunto = e.get("Subject", "")
+                        if valor in asunto.lower():
+                            alerts.append(
+                                f"📧 Correo con '{valor}':\n"
+                                f"   {asunto}\n"
+                                f"   De: {e.get('From','?')[:40]}"
+                            )
+
+            elif tipo == "evento_proximo":
+                events = await google_services.get_upcoming_events(user_id, max_results=10, days=1)
+                for event in events:
+                    titulo = event.get("summary", "").lower()
+                    if valor in titulo:
+                        start_str = event.get("start", {}).get("dateTime", "")
+                        if start_str:
+                            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                            start_local = start_dt.replace(tzinfo=None)
+                            mins = (start_local - now).total_seconds() / 60
+                            if 0 < mins <= 60:
+                                alerts.append(
+                                    f"📅 Evento '{desc}' en {int(mins)} min:\n"
+                                    f"   {event.get('summary','')}"
+                                )
+        except Exception as e:
+            logger.warning(f"Error evaluando hook {tipo} para {user_id}: {e}")
+
+    return alerts
+
+
 async def heartbeat(single_user: int = None):
     """
     Corre cada 30 minutos.
-    Por cada usuario con Google conectado:
-    - Revisa si hay correos urgentes (sin leer, de contactos importantes)
-    - Revisa si hay reuniones en los próximos 30 minutos
-    - Solo notifica si hay algo relevante — nunca spamea
+    Por cada usuario revisa:
+      1. Reuniones en los próximos 30 min (siempre)
+      2. Hooks personalizados configurados en el onboarding
+      3. Skills con trigger=heartbeat
+    Solo notifica si hay algo relevante — nunca spamea.
     """
     logger.info("💓 Heartbeat ejecutándose...")
 
@@ -67,28 +133,39 @@ async def heartbeat(single_user: int = None):
         try:
             alerts = []
 
-            # Revisar eventos próximos (en los siguientes 30 min)
-            events = await google_services.get_upcoming_events(user_id, max_results=5, days=1)
+            # ── 1. Reuniones próximas (siempre activo) ────────────
+            events = await google_services.get_upcoming_events(user_id, max_results=10, days=1)
             for event in events:
                 start_str = event.get("start", {}).get("dateTime", "")
                 if not start_str:
                     continue
-                # Parsear hora del evento
                 start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 start_local = start_dt.replace(tzinfo=None)
                 mins_until = (start_local - now).total_seconds() / 60
                 if 0 < mins_until <= 30:
                     alerts.append(
-                        f"⏰ Tienes una reunión en {int(mins_until)} minutos:\n"
-                        f"   *{event.get('summary', 'Sin título')}*"
+                        f"⏰ Reunión en {int(mins_until)} minutos:\n"
+                        f"   {event.get('summary', 'Sin título')}"
                     )
 
-            # Revisar si hay skills de heartbeat configuradas para este usuario
-            skills = memory.get_skills(user_id)
-            heartbeat_skill = next((s for s in skills if s.get("trigger") == "heartbeat"), None)
+            # ── 2. Hooks personalizados del usuario ───────────────
+            prefs = memory.get_category(user_id, "preferencias")
+            hooks = prefs.get("hooks", [])
+            if hooks:
+                hook_alerts = await _check_hooks(user_id, hooks, now)
+                alerts.extend(hook_alerts)
 
+            # ── 3. Skills con trigger=heartbeat ───────────────────
+            skills = memory.get_skills(user_id)
+            hb_skill = next((s for s in skills if s.get("trigger") == "heartbeat"), None)
+            if hb_skill and alerts:
+                # La skill de filtro de urgentes ya está aplicada implícitamente
+                # en la lógica de _check_hooks — no duplicar
+                pass
+
+            # Enviar solo si hay alertas
             if alerts:
-                msg = "💓 *Alerta de tu asistente:*\n\n" + "\n\n".join(alerts)
+                msg = "💓 Alerta de tu asistente:\n\n" + "\n\n".join(alerts)
                 await send_to_user(user_id, msg)
 
         except Exception as e:

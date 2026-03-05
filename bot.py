@@ -34,6 +34,7 @@ import google_auth
 import google_services
 import onboarding
 import workspace_memory
+import conversation_context
 import skills as skills_module
 from scheduler import start_scheduler, init_scheduler
 import google_services
@@ -270,10 +271,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Mensaje de {user_name} ({user_id}): {user_text}")
 
+
     # Agregar estado de conexión Google al contexto
     google_status = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado (usa /conectar_google)"
+
+    # Detectar contexto de la conversación
+    ctx = conversation_context.detect_context(user_text)
+
+    # Construir prompt con memoria completa + bloque de contexto enfocado
     system_prompt = memory.build_system_prompt(user_id, BASE_SYSTEM_PROMPT)
     system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
+
+    # Agregar bloque de contexto específico de esta conversación
+    context_block = conversation_context.build_context_prompt(user_id, ctx, memory)
+    if context_block:
+        system_prompt += context_block
+
+    # Agregar hint de comportamiento según el contexto
+    hint = conversation_context.get_context_hint(ctx)
+    if hint:
+        system_prompt += f"\n\nINSTRUCCIÓN DE CONTEXTO: {hint}"
 
     # Bootstrap: si el usuario ya tiene Google y no tiene doc todavía, crearlo
     if memory.has_google_connected(user_id):
