@@ -110,10 +110,31 @@ Acciones disponibles por servicio:
 - sheets: create, read, append, write
 - drive: list_files, search
 
+Parámetros exactos por acción (úsalos siempre con estos nombres):
+- calendar.create_event: title (str), start (ISO8601 ej: "2026-03-15T10:00:00"), end (ISO8601, opcional), description (str, opcional)
+- calendar.list_events: days (int, default 7)
+- calendar.delete_event: event_id (str)
+- gmail.send_email: to (str), subject (str), body (str)
+- gmail.list_emails: max_results (int, default 5)
+- gmail.get_email: email_id (str)
+- docs.create: title (str), content (str)
+- docs.get_content: doc_id (str)
+- docs.append_text: doc_id (str), text (str)
+- sheets.create: title (str)
+- sheets.read: sheet_id (str)
+- sheets.append: sheet_id (str), values (list)
+- drive.list_files: max_results (int)
+- drive.search: query (str)
+
 Ejemplos de [ACTION]:
 [ACTION: {"service": "calendar", "action": "list_events", "params": {"days": 7}}]
+[ACTION: {"service": "calendar", "action": "create_event", "params": {"title": "Reunión con equipo", "start": "2026-03-15T10:00:00", "end": "2026-03-15T11:00:00"}}]
 [ACTION: {"service": "gmail", "action": "send_email", "params": {"to": "juan@gmail.com", "subject": "Hola", "body": "¿Cómo estás?"}}]
 [ACTION: {"service": "docs", "action": "create", "params": {"title": "Mi documento", "content": "Contenido inicial"}}]
+
+IMPORTANTE para fechas: usa siempre formato "YYYY-MM-DDTHH:MM:SS" para start y end.
+Si el usuario dice "mañana a las 3pm", calcula la fecha ISO completa.
+Hoy es {fecha_actual}. Si no conoces la fecha exacta, usa el formato correcto de todos modos.
 
 Al final de tu respuesta, si aprendiste algo nuevo del usuario:
 [FACT: descripción breve]

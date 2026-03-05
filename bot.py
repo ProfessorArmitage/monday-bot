@@ -100,6 +100,45 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
     action  = action_data.get("action")
     params  = action_data.get("params", {})
 
+    # ── Normalizar params — Groq a veces usa nombres alternativos ──
+    if service == "calendar" and action == "create_event":
+        # Normalizar título: summary/name/evento → title
+        for alt in ("summary", "name", "evento", "event_name", "titulo"):
+            if alt in params and "title" not in params:
+                params["title"] = params.pop(alt)
+        # Normalizar start: start_time / startTime / fecha_inicio → start
+        for alt in ("start_time", "startTime", "fecha_inicio", "inicio", "fecha_hora_inicio"):
+            if alt in params and "start" not in params:
+                params["start"] = params.pop(alt)
+        # Normalizar end: end_time / endTime / fecha_fin → end
+        for alt in ("end_time", "endTime", "fecha_fin", "fin", "fecha_hora_fin", "duration"):
+            if alt in params and "end" not in params:
+                if alt == "duration":
+                    # Si Groq manda duración en minutos, calcular end desde start
+                    try:
+                        from datetime import datetime, timedelta
+                        import tz_utils
+                        start_str = params.get("start", "")
+                        if start_str:
+                            start_dt = datetime.fromisoformat(start_str)
+                            end_dt = start_dt + timedelta(minutes=int(params.pop(alt)))
+                            params["end"] = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    except Exception:
+                        params.pop(alt, None)
+                else:
+                    params["end"] = params.pop(alt)
+        # Eliminar campos que Google no acepta vía nuestra API
+        for unknown in ("location", "recurrence", "reminders", "color", "visibility",
+                        "guests", "participants", "conferenceData"):
+            if unknown in params and unknown != "attendees":
+                params.pop(unknown, None)
+        # guests/participants → attendees
+        for alt in ("guests", "participants", "invitados"):
+            if alt in params and "attendees" not in params:
+                params["attendees"] = params.pop(alt)
+
+        logger.info(f"create_event params normalizados: {params}")
+
     try:
         # ── Calendar ──
         if service == "calendar":
@@ -245,11 +284,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Agregar estado de conexión Google al contexto
     google_status = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado (usa /conectar_google)"
 
+    # Fecha actual para que Groq pueda calcular fechas correctamente
+    from datetime import datetime
+    import tz_utils
+    _user_data_for_tz = memory.get_user(user_id)
+    _user_now = tz_utils.now_for_user(_user_data_for_tz)
+    fecha_actual = _user_now.strftime("%Y-%m-%d %H:%M (%A)")
+
     # Detectar contexto de la conversación
     ctx = conversation_context.detect_context(user_text)
 
     # Construir prompt con memoria completa + bloque de contexto enfocado
-    system_prompt = memory.build_system_prompt(user_id, BASE_SYSTEM_PROMPT)
+    # Reemplazar {fecha_actual} en el prompt con la fecha real del usuario
+    prompt_with_date = BASE_SYSTEM_PROMPT.replace("{fecha_actual}", fecha_actual)
+    system_prompt = memory.build_system_prompt(user_id, prompt_with_date)
     system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
 
     # Agregar bloque de contexto específico de esta conversación
