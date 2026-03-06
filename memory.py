@@ -69,6 +69,8 @@ def _init_db():
                     last_seen         TIMESTAMP NOT NULL DEFAULT NOW(),
                     -- Dominio activo del usuario (estado de sugerencia pendiente)
                     domain_pending    JSONB NOT NULL DEFAULT '{}',
+                    -- Seed de memoria pre-sembrada por dominio
+                    domain_seed       JSONB NOT NULL DEFAULT '{}',
                     -- Reprovisión
                     bot_version       TEXT NOT NULL DEFAULT '0.0.0',
                     last_reprovisioned TIMESTAMP DEFAULT NULL,
@@ -100,6 +102,7 @@ def _init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_overrides JSONB NOT NULL DEFAULT '{}'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_identity JSONB NOT NULL DEFAULT '{}'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS domain_pending JSONB NOT NULL DEFAULT '{}'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS domain_seed JSONB NOT NULL DEFAULT '{}'",
             ]
             for sql in migrations:
                 try:
@@ -466,6 +469,24 @@ def set_bot_version(user_id: int, version: str):
                 (version, datetime.now(), user_id)
             )
             conn.commit()
+
+
+def get_domain_seed(user_id: int) -> dict:
+    """Devuelve el seed de dominio del usuario o {} si no existe."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT domain_seed FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row and row[0] else {}
+
+def set_domain_seed(user_id: int, seed: dict):
+    """Guarda el seed de dominio del usuario."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET domain_seed = %s WHERE user_id = %s",
+                (json.dumps(seed), user_id)
+            )
 
 
 def get_user_domain(user_id: int) -> str | None:

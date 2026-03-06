@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.3.0"
+MANIFEST_VERSION = "1.4.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -86,6 +86,15 @@ CHANGELOG = {
             "Los usuarios existentes reciben sugerencia personalizada basada en su perfil",
         ],
         "accion_requerida": "domain_suggestion",  # activa flujo de sugerencia
+    },
+    "1.4.0": {
+        "titulo": "Memoria pre-sembrada por dominio",
+        "cambios": [
+            "Cada dominio ahora tiene contexto base inyectado desde el primer mensaje",
+            "Vocabulario, flujos y preferencias de tu área se cargan automáticamente",
+            "El seed evoluciona cuando aprendes hechos relevantes a tu dominio",
+            "Los admins pueden configurar datos específicos (logo, handles, cédula, etc.)",
+        ],
     },
     # Ejemplo de cómo agregar la próxima versión:
     # "1.1.0": {
@@ -848,6 +857,39 @@ async def _suggest_domain_to_existing_user(user_id: int, user_data: dict, memory
     except Exception as e:
         logger.warning(f"No se pudo enviar sugerencia de dominio a {user_id}: {e}")
 
+
+async def _inject_domain_seed(user_id: int, domain_id: str, memory_module):
+    """
+    Inyecta el seed base de un dominio en la memoria del usuario.
+    - Fusiona base_memory en la memoria vertical (sin sobreescribir datos existentes)
+    - Inicializa domain_extras vacío para que el admin pueda configurarlo
+    - Idempotente: si ya tiene seed, no hace nada
+    """
+    import domain_seeds as ds
+
+    existing_seed = memory_module.get_domain_seed(user_id)
+    if existing_seed:
+        return  # ya tiene seed, no tocar
+
+    user_data = memory_module.get_user(user_id)
+
+    # Fusionar base_memory en memoria vertical
+    changes = ds.merge_seed_into_memory(user_data, domain_id)
+    for category, merged_values in changes.items():
+        memory_module.update_category(user_id, category, merged_values)
+
+    # Guardar seed completo con domain_extras vacío
+    from datetime import datetime
+    seed = {
+        "domain_id": domain_id,
+        "base_memory": ds.get_base_memory(domain_id),
+        "domain_extras": ds.get_empty_domain_extras(domain_id),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    memory_module.set_domain_seed(user_id, seed)
+    logger.info(f"Seed de dominio '{domain_id}' inyectado para usuario {user_id}")
+
+
 async def reprovision_user(user_id: int, memory_module, bot=None) -> bool:
     """
     Aplica reprovisión a un usuario específico.
@@ -891,6 +933,11 @@ async def reprovision_user(user_id: int, memory_module, bot=None) -> bool:
             )
             if needs_domain and memory_module.get_user_domain(user_id) is None:
                 await _suggest_domain_to_existing_user(user_id, user, memory_module, bot)
+
+            # Inyectar seed si tiene dominio pero no tiene seed aún
+            domain_id = memory_module.get_user_domain(user_id)
+            if domain_id and not memory_module.get_domain_seed(user_id):
+                await _inject_domain_seed(user_id, domain_id, memory_module)
 
         except Exception as e:
             logger.warning(f"No se pudo notificar al usuario {user_id}: {e}")

@@ -37,6 +37,7 @@ import onboarding
 import workspace_memory
 import conversation_context
 import provisioning
+import domain_seeds
 import identity as identity_module
 import skills as skills_engine
 from scheduler import start_scheduler, init_scheduler
@@ -51,6 +52,10 @@ if not TELEGRAM_TOKEN or not GROQ_API_KEY:
     raise ValueError("Falta TELEGRAM_TOKEN o GROQ_API_KEY en las variables de entorno")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+ADMIN_USER_IDS = set(
+    int(x.strip()) for x in os.getenv("ADMIN_USER_IDS", "").split(",")
+    if x.strip().isdigit()
+)
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -306,6 +311,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Reemplazar {fecha_actual} en el prompt con la fecha real del usuario
     prompt_with_date = BASE_SYSTEM_PROMPT.replace("{fecha_actual}", fecha_actual)
     system_prompt = memory.build_system_prompt(user_id, prompt_with_date)
+    # Inyectar seed de dominio si existe
+    seed_context = domain_seeds.build_seed_summary(memory.get_domain_seed(user_id))
+    if seed_context:
+        system_prompt += "\n\n" + seed_context
     system_prompt += f"\n\nEstado Google Workspace del usuario: {google_status}"
 
     # Agregar bloque de contexto específico de esta conversación
@@ -370,6 +379,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if facts_found:
         asyncio.create_task(skills_engine.auto_evolve_from_facts(
             user_id, [f.strip() for f in facts_found], memory, call_groq
+        ))
+        asyncio.create_task(domain_seeds.auto_enrich_seed_from_fact(
+            user_id, [f.strip() for f in facts_found], memory
         ))
     # Sincronizar al Google Doc cuando se aprende algo nuevo
     if facts_found and memory.has_google_connected(user_id):
@@ -1092,6 +1104,9 @@ async def _activate_domain_pack(user_id: int, domain_id: str, update):
     domain_skills = provisioning.get_domain_skills(domain_id)
     memory.set_user_domain(user_id, domain_id)
 
+    # Inyectar seed de dominio
+    await provisioning._inject_domain_seed(user_id, domain_id, memory)
+
     activated = []
     user_data = memory.get_user(user_id)
     for skill_data in domain_skills:
@@ -1178,6 +1193,198 @@ async def cmd_mi_dominio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
+# ── ADMIN ─────────────────────────────────────────────────────
+
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Comandos de administración. Solo para user_ids en ADMIN_USER_IDS.
+
+    /admin seed ver <user_id>
+        → Ver el domain_seed actual del usuario
+
+    /admin seed <dominio> <user_id> <campo> <valor>
+        → Configurar un campo de domain_extras para un usuario
+        Ejemplos:
+          /admin seed legal 12345 numero_cedula 1234567
+          /admin seed influencer 12345 handle_instagram @miusuario
+          /admin seed ventas 12345 crm_usado HubSpot
+          /admin seed salud 12345 especialidad cardiologia
+          /admin seed educacion 12345 institucion UNAM
+
+    /admin seed reset <user_id>
+        → Reinicializar el seed del usuario (conserva domain_extras)
+
+    /admin dominio ver <user_id>
+        → Ver el dominio activo del usuario
+
+    /admin dominio set <user_id> <dominio>
+        → Cambiar el dominio de un usuario directamente
+    """
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("No tienes permisos para usar este comando.")
+        return
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "Uso: /admin seed ver <user_id>\n"
+            "     /admin seed <dominio> <user_id> <campo> <valor>\n"
+            "     /admin seed reset <user_id>\n"
+            "     /admin dominio ver <user_id>\n"
+            "     /admin dominio set <user_id> <dominio>"
+        )
+        return
+
+    subcommand = args[0].lower()
+
+    # ── /admin seed ... ──
+    if subcommand == "seed":
+        action = args[1].lower()
+
+        # /admin seed ver <user_id>
+        if action == "ver" and len(args) >= 3:
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            seed = memory.get_domain_seed(target_id)
+            domain_id = memory.get_user_domain(target_id)
+            if not seed:
+                await update.message.reply_text(
+                    f"Usuario {target_id} no tiene seed.\n"
+                    f"Dominio activo: {domain_id or 'ninguno'}"
+                )
+                return
+            import json as _json
+            seed_text = _json.dumps(seed, ensure_ascii=False, indent=2)
+            # Telegram tiene límite de 4096 chars
+            if len(seed_text) > 3800:
+                seed_text = seed_text[:3800] + "\n... (truncado)"
+            await update.message.reply_text(
+                f"Seed de usuario {target_id} (dominio: {domain_id}):\n\n{seed_text}"
+            )
+            return
+
+        # /admin seed reset <user_id>
+        if action == "reset" and len(args) >= 3:
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            domain_id = memory.get_user_domain(target_id)
+            if not domain_id:
+                await update.message.reply_text(f"Usuario {target_id} no tiene dominio activo.")
+                return
+            # Conservar domain_extras del seed anterior
+            old_seed = memory.get_domain_seed(target_id)
+            old_extras = old_seed.get("domain_extras", {}) if old_seed else {}
+            from datetime import datetime as _dt
+            new_seed = {
+                "domain_id": domain_id,
+                "base_memory": domain_seeds.get_base_memory(domain_id),
+                "domain_extras": old_extras,
+                "created_at": _dt.utcnow().isoformat(),
+                "reset_at": _dt.utcnow().isoformat(),
+            }
+            memory.set_domain_seed(target_id, new_seed)
+            await update.message.reply_text(
+                f"Seed de usuario {target_id} reinicializado.\n"
+                f"domain_extras conservados: {list(old_extras.keys())}"
+            )
+            return
+
+        # /admin seed <dominio> <user_id> <campo> <valor>
+        if len(args) >= 5:
+            domain_arg = args[1].lower()
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            field = args[3].lower()
+            value = " ".join(args[4:])
+
+            # Validar dominio
+            if not provisioning.get_domain_by_id(domain_arg):
+                domains_list = [d["id"] for d in provisioning.DOMAINS_CATALOG]
+                await update.message.reply_text(
+                    f"Dominio '{domain_arg}' no existe.\n"
+                    f"Dominios disponibles: {', '.join(domains_list)}"
+                )
+                return
+
+            # Validar campo
+            valid_extras = domain_seeds.get_empty_domain_extras(domain_arg)
+            if field not in valid_extras:
+                await update.message.reply_text(
+                    f"Campo '{field}' no existe en domain_extras de '{domain_arg}'.\n"
+                    f"Campos disponibles: {', '.join(valid_extras.keys())}"
+                )
+                return
+
+            current_seed = memory.get_domain_seed(target_id)
+            updated_seed = domain_seeds.apply_admin_override(current_seed, domain_arg, field, value)
+            memory.set_domain_seed(target_id, updated_seed)
+
+            await update.message.reply_text(
+                f"Actualizado para usuario {target_id}:\n"
+                f"  dominio: {domain_arg}\n"
+                f"  {field}: {value}"
+            )
+            return
+
+        await update.message.reply_text("Argumentos insuficientes para /admin seed.")
+        return
+
+    # ── /admin dominio ... ──
+    if subcommand == "dominio":
+        if len(args) < 3:
+            await update.message.reply_text("Uso: /admin dominio ver <user_id> | set <user_id> <dominio>")
+            return
+
+        action = args[1].lower()
+
+        if action == "ver":
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            domain_id = memory.get_user_domain(target_id)
+            user = memory.get_user(target_id)
+            nombre = user.get("identidad", {}).get("nombre", "desconocido")
+            await update.message.reply_text(
+                f"Usuario {target_id} ({nombre}):\n"
+                f"Dominio activo: {domain_id or 'ninguno'}"
+            )
+            return
+
+        if action == "set" and len(args) >= 4:
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            new_domain = args[3].lower()
+            if not provisioning.get_domain_by_id(new_domain):
+                await update.message.reply_text(f"Dominio '{new_domain}' no existe.")
+                return
+            memory.set_user_domain(target_id, new_domain)
+            await provisioning._inject_domain_seed(target_id, new_domain, memory)
+            await update.message.reply_text(
+                f"Dominio de usuario {target_id} actualizado a '{new_domain}'.\n"
+                f"Seed inyectado correctamente."
+            )
+            return
+
+    await update.message.reply_text(f"Subcomando '{subcommand}' no reconocido.")
+
+
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la versión actual del bot y cuándo se actualizó."""
     user_id = update.effective_user.id
@@ -1220,6 +1427,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(CommandHandler("version", cmd_version))
     telegram_app.add_handler(CommandHandler("mi_dominio", cmd_mi_dominio))
+    telegram_app.add_handler(CommandHandler("admin", cmd_admin))
     telegram_app.add_handler(CommandHandler("mi_zona", cmd_mi_zona))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))
