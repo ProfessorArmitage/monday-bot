@@ -14,15 +14,15 @@
 **Tu asistente personal inteligente en Telegram**
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B-F55036?style=flat-square)](https://groq.com)
+[![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B_+_Whisper-F55036?style=flat-square)](https://groq.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Railway-336791?style=flat-square&logo=postgresql&logoColor=white)](https://railway.app)
 [![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white)](https://railway.app)
-[![Version](https://img.shields.io/badge/Version-1.2.1-27AE60?style=flat-square)](AGENTS.md)
-[![Lines](https://img.shields.io/badge/Code-4%2C760_líneas-8E44AD?style=flat-square)](.)
+[![Version](https://img.shields.io/badge/Version-1.7.0-27AE60?style=flat-square)](AGENTS.md)
+[![Lines](https://img.shields.io/badge/Code-~8%2C000_líneas-8E44AD?style=flat-square)](.))
 
 <br/>
 
-*Memoria vertical · Skills evolutivas · Google Workspace · Multi-usuario · Timezone DST-aware*
+*Memoria vertical · Skills evolutivas · Google Workspace · Mensajes de voz · Multi-usuario · Timezone DST-aware*
 
 <br/>
 
@@ -32,326 +32,311 @@
 
 ## ¿Qué es Monday?
 
-Monday es un asistente personal que vive en Telegram. No es un chatbot genérico — conoce tu trabajo, tus proyectos, tu equipo y tus metas. Aprende de cada conversación, se integra con tu Google Workspace y se adapta a tu ritmo de vida.
+Monday es un asistente personal que vive en Telegram. No es un chatbot genérico — conoce tu trabajo, tus proyectos, tu equipo y tus metas. Aprende de cada conversación, se integra con tu Google Workspace, responde mensajes de voz y se adapta a tu ritmo de vida.
 
 Está diseñado para ser **multi-usuario desde el inicio**: cada persona tiene su propia memoria, sus propias skills y su propia conexión a Google. Un solo despliegue sirve a todos tus usuarios.
 
 ```
 Usuario: "agenda una cita con mi dentista mañana a las 5:30"
-Monday:  ✅ Evento creado: Cita dentista — Viernes 6 Mar, 5:30 PM PST
+Monday:  ✅ Evento creado: Cita dentista — Viernes 6 Mar, 5:30 PM
          [Agendado en tu Google Calendar]
 ```
 
 ```
-Usuario: "¿qué tengo pendiente esta semana?"
+Usuario: [mensaje de voz] "¿qué tengo pendiente esta semana?"
 Monday:  Tienes 3 cosas prioritarias esta semana:
-         1. Presentación con el cliente el miércoles → ¿la preparamos juntos?
+         1. Presentación con el cliente el miércoles
          2. Revisión del sprint (tu meta de la semana)
          3. Llamada con el equipo de marketing el jueves
 ```
 
 ---
 
-## Características
+## Características principales
 
 ### 🧠 Memoria vertical por categorías
 
-Monday no olvida. Organiza lo que sabes en 9 categorías estructuradas:
+Monday no olvida. Organiza lo que aprende en 9 categorías estructuradas persistidas en PostgreSQL:
 
 | Categoría | Qué guarda |
-|-----------|-----------|
+|-----------|------------|
 | `identidad` | Nombre, ciudad, idioma, profesión |
 | `trabajo` | Empresa, rol, equipo, sector |
 | `proyectos` | Lista de proyectos activos con estado |
-| `relaciones` | Personas clave de tu día a día |
+| `relaciones` | Personas clave del día a día |
 | `metas` | Objetivos de semana, mes y año |
 | `preferencias` | Tono, formato, estilo de comunicación |
-| `ritmo` | Horarios, zona horaria, días libres |
+| `ritmo` | Horarios, zona horaria, días libres, DND |
 | `vida_personal` | Familia, hobbies, contexto personal |
-| `hechos` | Datos sueltos aprendidos en conversación |
+| `hechos` | Datos sueltos detectados en conversación |
 
-Cuando detecta algo nuevo en la conversación, lo guarda automáticamente:
+Cuando detecta algo nuevo, lo guarda automáticamente sin interrumpir la conversación:
 ```
-Monday aprende → [FACT: Juan cambia de empresa en abril] → memoria actualizada
+[FACT: Juan cambia de empresa en abril] → memoria actualizada silenciosamente
 ```
 
 ### ⚡ Skills personalizadas y evolutivas
 
-Las skills son modos de operación que el asistente activa según el contexto. Lo que las hace únicas: **se personalizan con tu contexto real al activarlas y evolucionan automáticamente cuando aprendes algo nuevo**.
+Las skills son modos de operación que se activan según el contexto. Lo que las hace únicas: **se personalizan con el contexto real del usuario al activarlas y evolucionan automáticamente cuando aprenden algo nuevo**.
 
-**Skills incluidas:**
+**6 skills base disponibles para todos:**
 
-| Skill | Trigger | Qué hace |
-|-------|---------|---------|
-| 📧 Correo formal | Contexto correo | Redacta correos con tu tono, empresa y contactos reales |
-| 📝 Acta de reunión | Manual | Estructura notas de reunión con tus proyectos como contexto |
-| ✅ Gestor de tareas | Contexto trabajo | Clasifica tareas por urgencia considerando tus metas activas |
-| 🌅 Briefing matutino | Mañana | Resumen diario personalizado a tu hora y zona horaria |
-| 🚨 Filtro de urgentes | Heartbeat | Detecta reuniones próximas y correos críticos |
-| 🎯 Metas semanales | Mañana lunes | Seguimiento de objetivos conectado a tu ritmo |
+| Skill | Descripción |
+|-------|-------------|
+| 📧 Correo formal | Redactar correos profesionales |
+| 📝 Acta de reunión | Convertir notas en actas estructuradas |
+| ✅ Gestor de tareas | Organizar y priorizar pendientes |
+| 🌅 Briefing matutino | Resumen personalizado cada mañana |
+| 🚨 Filtro de urgentes | Alertar solo sobre lo realmente urgente |
+| 🎯 Metas semanales | Seguimiento de objetivos cada lunes |
 
-**También puedes crear las tuyas:**
-```
-/nueva_skill ayúdame a preparar reportes ejecutivos para mi jefe
-```
+### 🏢 Paquetes de dominio profesional
+
+6 paquetes especializados con 4 skills cada uno (24 skills de dominio en total):
+
+| Dominio | Skills incluidas |
+|---------|-----------------|
+| ⚖️ **Legal** | Redacción legal, Análisis de riesgo, Seguimiento de casos, Comunicación con clientes |
+| 🎬 **Influencer** | Calendario de contenido, Voz de marca, Propuesta de colaboración, Brief de métricas |
+| 🏢 **Corporativo** | Resumen ejecutivo, Comunicación con stakeholders, Revisión estratégica, Preparación de juntas |
+| 💼 **Ventas** | Seguimiento de prospectos, Propuesta comercial, Revisión de pipeline, Comunicación con clientes |
+| 🩺 **Salud** | Notas de consulta, Seguimiento clínico, Comunicación con pacientes, Brief de agenda |
+| 📚 **Educación** | Preparación de clases, Seguimiento de alumnos, Creación de material, Comunicación educativa |
 
 ### 🔗 Google Workspace integrado
 
-Conecta tu cuenta de Google una vez y Monday opera directamente sobre ella:
+Conexión OAuth2 por usuario — cada quien conecta su propia cuenta:
 
-- **📅 Calendar** — leer, crear y eliminar eventos. Respeta tu timezone y DST.
-- **📧 Gmail** — leer, filtrar y enviar correos
-- **📄 Docs** — crear documentos, leer contenido, agregar texto
-- **📊 Sheets** — crear hojas, leer rangos, agregar filas
-- **💾 Drive** — listar y buscar archivos
+- **Google Calendar** — leer eventos, crear citas, eliminar eventos
+- **Gmail** — leer correos recientes, ver correos completos, enviar emails
+- **Google Docs** — crear documentos, leer contenido, buscar archivos
+- **Google Drive** — búsqueda de archivos, carpeta Monday automática, backups de memoria
 
-Cada usuario conecta **su propia cuenta** — Monday nunca mezcla credenciales.
+### 🎙️ Mensajes de voz
 
-### 🌍 Timezone DST-aware por usuario
+- **Entrada por voz**: manda un audio y Monday lo transcribe con Whisper (via Groq)
+- **Respuesta por voz**: activa `/voz activar` para recibir respuestas en audio (gTTS)
+- Providers intercambiables: OpenAI Whisper, ElevenLabs, Google Cloud TTS listos para activar
 
-Cada usuario tiene su timezone guardada. Monday la auto-detecta desde tu Google Calendar si no la configuras. Respeta el horario de verano (DST) automáticamente.
+### 💾 Backup automático de memoria
 
-```
-/mi_zona Los Angeles      → America/Los_Angeles (-08:00 / -07:00 DST)
-/mi_zona Europe/Madrid    → Europe/Madrid (+01:00 / +02:00 DST)
-```
+- Respaldo JSON semanal automático en la carpeta Monday de Google Drive
+- Retención de últimos 4 respaldos (~1 mes)
+- Export manual con `/exportar_memoria`, restauración con `/importar_memoria`
 
-### 💾 Memoria extendida en Google Doc
+### 🔔 Notificaciones inteligentes
 
-Además de la base de datos, Monday mantiene un Google Doc de memoria personal que puedes leer y editar directamente. Sincronización bidireccional:
+| Job | Frecuencia | Qué hace |
+|-----|-----------|----------|
+| Heartbeat | Cada 30 min | Alertas de reuniones próximas + hooks personalizados |
+| Briefing matutino | 7–9am (hora local) | Resumen del día con calendario y correos |
+| Resumen semanal | Lunes 8am | Vista de la semana que comienza |
+| Cierre semanal | Viernes 5pm | Wrap-up de la semana |
+| Sincronización | Noche | Sincroniza memoria con Google Doc |
+| Reprovisión | Domingos 3am | Actualiza skills y configuración |
+| Backup | Domingos 4am | Respaldo de memoria en Drive |
 
-```
-DB ←→ Google Doc "Memoria — {tu nombre}"
-```
+### 🌐 Sistema de reprovisión
 
-### 🔄 Reprovisión automática versionada
-
-Cuando el sistema se actualiza, Monday notifica a cada usuario con el changelog exacto de qué cambió. **Sin perder ningún dato personal.**
-
-```
-🔄 Actualicé mis capacidades:
-v1.2.0 — Skills personalizadas y evolutivas
-  • Las skills ahora se personalizan con tu contexto al activarlas
-  • Evolución automática cuando aprendes algo nuevo
-  • /nueva_skill para crear skills propias
-Tu memoria personal está intacta ✅
-```
-
-### ⏰ Ritmo automático
-
-Jobs automáticos sin configuración extra:
-
-| Momento | Qué hace |
-|---------|---------|
-| Cada 30 min | Heartbeat — revisa reuniones próximas y alerts |
-| Lun-Vie mañana | Briefing personalizado a tu hora local |
-| Lunes | Resumen semanal + metas de la semana |
-| Viernes | Cierre de semana |
-| 2am | Sync silencioso de memoria al Google Doc |
-| Domingo | Reprovisión de backup |
+Sin necesidad de que el usuario haga nada: cada domingo el bot compara la versión instalada del usuario contra la versión actual y aplica cambios automáticamente — nuevas skills, nuevos dominios, actualizaciones de prompts.
 
 ---
 
 ## Comandos
 
-### Esenciales
-| Comando | Descripción |
-|---------|-------------|
-| `/start` | Inicia el onboarding o saluda si ya te conoce |
-| `/ayuda` | Lista todos los comandos |
-| `/estado` | Resumen de tu configuración actual |
-| `/memoria` | Ver tu memoria guardada por categorías |
-| `/olvidar` | Borrar una categoría o toda la memoria |
+### Usuario — Conversación y memoria
 
-### Google Workspace
 | Comando | Descripción |
 |---------|-------------|
-| `/conectar_google` | Conecta tu cuenta de Google (OAuth) |
-| `/desconectar_google` | Revoca el acceso a tu cuenta |
-| `/mi_doc` | Ver tu Google Doc de memoria |
-| `/sincronizar` | Sync manual Doc → DB |
+| `/start` | Inicia el bot. Si es nuevo, arranca el onboarding de 5 pasos |
+| `/estado` | Resumen de la memoria actual: proyectos, metas, skills activas |
+| `/memoria` | Ver toda la memoria guardada por categoría |
+| `/olvidar` | Borra toda la memoria (pide confirmación) |
 
-### Skills
-| Comando | Descripción |
-|---------|-------------|
-| `/skills` | Ver catálogo de skills disponibles |
-| `/mis_skills` | Ver tus skills activas y su estado |
-| `/activar_skill [nombre]` | Activar una skill (se personaliza al instante) |
-| `/desactivar_skill [nombre]` | Desactivar una skill |
-| `/nueva_skill [descripción]` | Crear una skill personalizada |
-| `/evolucion [skill]` | Actualizar una skill con tu memoria actual |
+### Usuario — Google Workspace
 
-### Personalización
 | Comando | Descripción |
 |---------|-------------|
-| `/mi_asistente` | Ver/cambiar nombre, tono y trato del asistente |
-| `/mi_zona` | Ver/cambiar tu timezone |
+| `/conectar_google` | Conecta la cuenta de Google via OAuth2 |
+| `/desconectar_google` | Desconecta Google y elimina los tokens |
+| `/mi_doc` | Enlace al Google Doc de memoria personal |
+| `/sincronizar` | Sincroniza manualmente la memoria con el Google Doc |
 
-### Sistema
+### Usuario — Skills
+
 | Comando | Descripción |
 |---------|-------------|
-| `/version` | Ver versión actual del bot |
-| `/heartbeat` | Forzar heartbeat manual |
+| `/skills` | Catálogo completo de skills disponibles |
+| `/mis_skills` | Skills activas con su contenido personalizado |
+| `/activar_skill [nombre]` | Activa una skill del catálogo |
+| `/desactivar_skill [nombre]` | Desactiva una skill activa |
+| `/nueva_skill [descripción]` | Crea una skill personalizada desde cero |
+| `/evolucion [nombre]` | Regenera la personalización de una skill con la memoria actual |
+
+### Usuario — Dominio profesional
+
+| Comando | Descripción |
+|---------|-------------|
+| `/mi_dominio` | Ver dominio activo + skills del paquete |
+| `/mi_dominio [nombre]` | Cambiar de dominio (ej. `/mi_dominio ventas`) |
+
+### Usuario — Preferencias y configuración
+
+| Comando | Descripción |
+|---------|-------------|
+| `/mi_zona` | Ver o cambiar timezone (ej. `/mi_zona America/Monterrey`) |
+| `/mi_asistente` | Ver o cambiar nombre e identidad del asistente |
+| `/version` | Versión actual del bot y changelog |
+| `/ayuda` | Lista de comandos disponibles |
+
+### Usuario — Voz
+
+| Comando | Descripción |
+|---------|-------------|
+| `/voz` | Ver estado actual de respuestas por voz |
+| `/voz activar` | Activar respuestas en audio |
+| `/voz desactivar` | Volver a respuestas en texto (default) |
+
+### Usuario — Modo silencio (DND)
+
+| Comando | Descripción |
+|---------|-------------|
+| `/dnd` | Ver estado actual del modo silencio |
+| `/dnd activar HH:MM HH:MM` | Activar horario sin notificaciones (ej. `22:00 07:00`) |
+| `/dnd activar HH:MM HH:MM [dias]` | Con días adicionales (ej. `22:00 07:00 sabado domingo`) |
+| `/dnd desactivar` | Desactivar modo silencio |
+| `/dnd dias [días]` | Configurar días sin notificaciones |
+| `/dnd snooze 1h` | Silenciar por tiempo determinado (30m, 1h, 2h, 3h) |
+| `/dnd snooze off` | Cancelar snooze activo |
+
+### Usuario — Backup de memoria
+
+| Comando | Descripción |
+|---------|-------------|
+| `/exportar_memoria` | Genera respaldo JSON en carpeta Monday de Drive |
+| `/importar_memoria` | Restaura memoria desde el respaldo más reciente (pide confirmación) |
+
+### Admin — Semilla de dominio
+
+| Comando | Descripción |
+|---------|-------------|
+| `/admin seed ver <user_id>` | Ver la seed de dominio actual del usuario |
+| `/admin seed <dominio> <user_id> <campo> <valor>` | Configurar campo en domain_extras |
+| `/admin seed reset <user_id>` | Reinicializar seed conservando domain_extras |
+
+### Admin — Dominio
+
+| Comando | Descripción |
+|---------|-------------|
+| `/admin dominio ver <user_id>` | Ver el dominio activo del usuario |
+| `/admin dominio set <user_id> <dominio>` | Cambiar dominio e inyectar seed |
+
+### Admin — Memoria
+
+| Comando | Descripción |
+|---------|-------------|
+| `/admin memoria exportar <user_id>` | Genera backup desde DB y lo sube a Drive |
+| `/admin memoria ver_backups <user_id>` | Lista los backups disponibles en Drive |
+
+### Admin — Diagnóstico
+
+| Comando | Descripción |
+|---------|-------------|
+| `/heartbeat` | Ejecuta el heartbeat manualmente para un usuario |
 
 ---
 
-## Onboarding
+## Stack técnico
 
-El primer arranque guía al usuario en 9 preguntas. Groq extrae los datos automáticamente — el usuario puede responder en lenguaje natural.
+| Componente | Tecnología |
+|-----------|-----------|
+| Plataforma | Telegram Bot API |
+| Framework | python-telegram-bot 21.5 |
+| IA — Chat | Groq API (LLaMA 3.3 70B Versatile) |
+| IA — Voz STT | Groq Whisper Large v3 |
+| IA — Voz TTS | gTTS (Google Text-to-Speech) |
+| Audio | ffmpeg (conversión MP3→OGG) |
+| Base de datos | PostgreSQL (Railway) |
+| Scheduler | APScheduler |
+| HTTP | httpx (async) |
+| Deploy | Railway (Docker) |
+| Google OAuth | OAuth 2.0 con refresh automático |
 
+---
+
+## Variables de entorno
+
+| Variable | Descripción |
+|----------|-------------|
+| `TELEGRAM_TOKEN` | Token del bot de Telegram |
+| `GROQ_API_KEY` | API key de Groq (LLaMA + Whisper) |
+| `DATABASE_URL` | URL de PostgreSQL (Railway la inyecta automáticamente) |
+| `RAILWAY_PUBLIC_URL` | URL pública del servicio (para el callback de OAuth) |
+| `GOOGLE_CLIENT_ID` | Client ID de Google OAuth |
+| `GOOGLE_CLIENT_SECRET` | Client Secret de Google OAuth |
+| `ADMIN_USER_IDS` | IDs de Telegram separados por coma con acceso a `/admin` |
+
+---
+
+## Instalación y deploy
+
+### Requisitos
+- Python 3.12+
+- PostgreSQL
+- Cuenta en Groq (gratuita)
+- Proyecto en Google Cloud con OAuth2 configurado
+
+### Variables mínimas para arrancar
+```bash
+TELEGRAM_TOKEN=...
+GROQ_API_KEY=...
+DATABASE_URL=postgresql://...
+RAILWAY_PUBLIC_URL=https://tu-servicio.railway.app
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+ADMIN_USER_IDS=tu_telegram_id
 ```
-1. 👤 Nombre y ubicación
-2. 💼 Trabajo y empresa
-3. 🚀 Proyectos activos
-4. 👥 Personas clave
-5. 🎯 Metas de la semana
-6. ⏰ Ritmo y horarios
-7. 💬 Preferencias de comunicación
-8. 🔔 Qué eventos monitorear
-9. 🤖 Cómo quieres que sea tu asistente
+
+### Deploy en Railway
+```bash
+git clone https://github.com/ProfessorArmitage/monday-bot
+cd monday-bot
+# Conectar a Railway y configurar variables de entorno
+railway up
 ```
+
+El `Dockerfile` incluido instala ffmpeg automáticamente. La base de datos se inicializa sola al arrancar.
 
 ---
 
 ## Arquitectura
 
 ```
-monday-bot/
-├── bot.py                  # Entrada. Telegram + Groq + acciones Google
-├── memory.py               # Única interfaz con PostgreSQL
-├── provisioning.py         # Versioning, system prompt, catálogo de skills
-├── identity.py             # Identidad Luma + personalización por usuario
-├── skills.py               # Motor de skills: render, evolución, custom
-├── onboarding.py           # 9 pasos con extracción inteligente
-├── scheduler.py            # Heartbeat, briefing, ritmo semanal
-├── conversation_context.py # Detección de contexto + memoria enfocada
-├── tz_utils.py             # Timezones DST-aware por usuario
-├── google_auth.py          # OAuth 2.0 por usuario
-├── oauth_server.py         # Callback server aiohttp
-├── google_services.py      # APIs Google: Calendar, Gmail, Docs, Sheets, Drive
-├── workspace_memory.py     # Sync bidireccional con Google Doc
-├── AGENTS.md               # Instrucciones completas para agentes autónomos
-└── GUIA_REDEPLOY.md        # Guía de deploys seguros
-```
-
-### Flujo de un mensaje
-
-```
-Mensaje del usuario
-      ↓
-detect_context()          ← ¿es sobre trabajo, correo, calendario...?
-      ↓
-build_system_prompt()     ← identidad + memoria vertical + skills activas
-      ↓
-call_groq()               ← LLaMA 3.3 70B
-      ↓
-parse [ACTION] / [FACT]   ← ejecutar Google API / guardar en memoria
-      ↓
-Respuesta al usuario
+bot.py                  ← núcleo: handlers, Groq, orquestación
+├── memory.py           ← PostgreSQL: CRUD de memoria por categorías
+├── onboarding.py       ← flujo de 5 pasos para usuarios nuevos
+├── provisioning.py     ← skills catalog, domains, reprovisión automática
+├── skills.py           ← motor de skills personalizadas y evolutivas
+├── domain_seeds.py     ← memoria pre-sembrada por dominio profesional
+├── audio_handler.py    ← STT (Whisper/Groq) + TTS (gTTS) con providers
+├── scheduler.py        ← APScheduler: heartbeat, briefing, backup, DND
+├── google_auth.py      ← OAuth2 con refresh automático de tokens
+├── google_services.py  ← Calendar, Gmail, Docs, Drive
+├── workspace_memory.py ← Google Doc como memoria extendida
+├── memory_backup.py    ← export/import JSON en Drive
+└── tz_utils.py         ← timezone DST-aware + helpers DND
 ```
 
 ---
 
-## Deploy
+## Documentación
 
-### Requisitos
+Para especificaciones completas de arquitectura, decisiones de diseño y guías de extensión, ver [`AGENTS.md`](AGENTS.md).
 
-- Cuenta en [Railway](https://railway.app)
-- Bot de Telegram ([@BotFather](https://t.me/BotFather))
-- API Key de [Groq](https://console.groq.com)
-- Google Cloud Project con OAuth 2.0 configurado
-
-### Variables de entorno
-
-```env
-TELEGRAM_TOKEN=
-GROQ_API_KEY=
-DATABASE_URL=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-RAILWAY_PUBLIC_URL=https://tu-proyecto.up.railway.app
-CALLBACK_URL=https://tu-proyecto.up.railway.app/oauth/callback
-PORT=8080
-```
-
-### Pasos
-
-```bash
-# 1. Clonar el repo
-git clone https://github.com/tu-usuario/monday-bot
-cd monday-bot
-
-# 2. Crear proyecto en Railway y agregar PostgreSQL
-# (desde railway.app o Railway CLI)
-
-# 3. Configurar variables de entorno en Railway
-
-# 4. Deploy
-git push origin main
-# Railway detecta el push y despliega automáticamente
-
-# 5. La DB se inicializa sola al primer arranque
-```
-
-### Google OAuth — configuración
-
-1. Crear proyecto en [Google Cloud Console](https://console.cloud.google.com)
-2. Habilitar APIs: Calendar, Gmail, Drive, Docs, Sheets
-3. Crear credenciales OAuth 2.0 (tipo: Web application)
-4. Agregar URI de redirección: `https://tu-proyecto.up.railway.app/oauth/callback`
-5. Agregar tu email como usuario de prueba (mientras la app no esté verificada)
-
----
-
-## Para agentes autónomos
-
-Este proyecto incluye [`AGENTS.md`](AGENTS.md) — 854 líneas de instrucciones estructuradas para que cualquier LLM pueda operar el proyecto de forma autónoma y segura.
-
-Cubre: arquitectura completa, schema de DB, flujo de mensajes, sistema de skills, reprovisión, timezones, cómo hacer cada tipo de cambio, y zonas protegidas que ningún agente debe tocar sin autorización explícita.
-
-```
-Para cambiar el comportamiento del asistente:
-  → provisioning.py (SYSTEM_PROMPT) + bump MINOR + CHANGELOG + deploy
-
-Para agregar una skill:
-  → provisioning.py (SKILLS_CATALOG) + bump MINOR + deploy
-
-Para agregar un comando:
-  → bot.py (función cmd_*) + registrar en main() + deploy
-```
-
----
-
-## Stack
-
-| Componente | Tecnología |
-|-----------|-----------|
-| Lenguaje | Python 3.12 |
-| IA | Groq — LLaMA 3.3 70B |
-| Telegram | python-telegram-bot 21.5 |
-| Base de datos | PostgreSQL (Railway) |
-| HTTP | httpx 0.27.2 |
-| Scheduler | APScheduler 3.10.4 |
-| OAuth server | aiohttp 3.9.5 |
-| Timezones | zoneinfo (stdlib) |
-| Deploy | Railway PaaS |
-
----
-
-## Seguridad
-
-- Los tokens de Google se guardan cifrados por usuario en PostgreSQL — nunca se comparten entre usuarios
-- Cada llamada a Groq usa el contexto exclusivo del usuario — sin filtraciones entre sesiones
-- OAuth 2.0 estándar con refresh automático de tokens
-- Las credenciales nunca se escriben en código — siempre via variables de entorno
-- Las zonas protegidas del sistema están documentadas explícitamente en `AGENTS.md`
+Para referencia completa de características, comandos y opciones de administración, ver el documento de características incluido en el repositorio.
 
 ---
 
 <div align="center">
-
-**Monday v1.2.1** · Python 3.12 · Groq LLaMA 3.3 70B · Railway
-
-*Construido con ♥ para ser el asistente que realmente conoce a su usuario*
-
+<sub>Construido con ❤️ · Desplegado en Railway · Impulsado por Groq</sub>
 </div>
