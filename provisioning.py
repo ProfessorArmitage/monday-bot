@@ -706,12 +706,11 @@ def get_domain_skills(domain_id: str) -> list[dict]:
 
 def get_domains_menu_text() -> str:
     """Genera el texto del menú de selección de dominio para enviar al usuario."""
-    lines = ["*Elige el paquete que mejor describe tu actividad:*\n"]
+    lines = ["Elige el paquete que mejor describe tu actividad:\n"]
     for i, d in enumerate(DOMAINS_CATALOG, 1):
-        lines.append(f"{i}\u20e3 {d['emoji']} *{d['name']}*")
-        lines.append(f"   _{d['description']}_")
-    lines.append("\n7\u20e3 \U0001f513 *General* _(sin paquete específico)_")
-    lines.append("\nResponde con el número o usa /mi_dominio más adelante.")
+        lines.append(f"{i}. {d['emoji']} {d['name']} — {d['description']}")
+    lines.append(f"{len(DOMAINS_CATALOG)+1}. 🔓 General — sin paquete específico")
+    lines.append("\nResponde con el número o usa /mi_dominio en cualquier momento.")
     return "\n".join(lines)
 
 async def infer_domain_from_memory(user_data: dict, call_groq_fn) -> str | None:
@@ -826,26 +825,25 @@ async def _suggest_domain_to_existing_user(user_id: int, user_data: dict, memory
         domain = get_domain_by_id(best_domain)
         skill_names = [s["name"] for s in get_domain_skills(best_domain)]
         msg = (
-            f"\n🎯 *Novedad — Paquetes de skills por dominio*\n\n"
+            f"\n🎯 Novedad — Paquetes de skills por dominio\n\n"
             f"Basándome en tu perfil, creo que el paquete "
-            f"*{domain['emoji']} {domain['name']}* es para ti:\n"
-            f"_{', '.join(skill_names)}_\n\n"
-            f"¿Lo activo? Responde *sí*, *no* para ver otras opciones, "
-            f"o *saltar* para después con /mi_dominio"
+            f"{domain['emoji']} {domain['name']} es para ti:\n"
+            f"{chr(10).join(skill_names)}\n\n"
+            f"¿Lo activo? Responde: si / no / saltar"
         )
         pending_state["suggested"] = best_domain
         pending_state["state"] = "awaiting_confirmation"
     else:
         msg = (
-            f"\n🎯 *Novedad — Paquetes de skills por dominio*\n\n"
-            f"Ahora tengo skills especializadas según tu área de trabajo.\n\n"
+            "\n🎯 Novedad — Paquetes de skills por dominio\n\n"
+            "Ahora tengo skills especializadas según tu área de trabajo.\n\n"
             + get_domains_menu_text()
         )
         pending_state["suggested"] = None
         pending_state["state"] = "awaiting_selection"
 
     try:
-        await bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
+        await bot.send_message(chat_id=user_id, text=msg)
         memory_module.set_domain_pending(user_id, pending_state)
     except Exception as e:
         logger.warning(f"No se pudo enviar sugerencia de dominio a {user_id}: {e}")

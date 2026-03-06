@@ -972,11 +972,11 @@ async def _send_domain_suggestion(user_id: int, update):
     if not domain_pending.get("suggested"):
         # No se detectó dominio — mostrar menú genérico
         msg = (
-            "\n🎯 *Un último detalle* — ¿Cuál describe mejor tu actividad?\n\n"
+            "\n🎯 Un último detalle — ¿Cuál describe mejor tu actividad?\n\n"
             + provisioning.get_domains_menu_text()
         )
         try:
-            await update.message.reply_text(msg, parse_mode="Markdown")
+            await update.message.reply_text(msg)
         except Exception:
             pass
         return
@@ -990,15 +990,14 @@ async def _send_domain_suggestion(user_id: int, update):
     skills_text = ", ".join(skill_names)
 
     msg = (
-        f"\n🎯 *Detecté que trabajas en {domain['name']}* {domain['emoji']}\n\n"
+        f"\n🎯 Detecté que trabajas en {domain['name']} {domain['emoji']}\n\n"
         f"Tengo un paquete de skills especializadas para ti:\n"
-        f"_{skills_text}_\n\n"
-        f"¿Activo el paquete *{domain['name']}*?\n\n"
-        f"Responde *sí* para activarlo, *no* para ver otras opciones, "
-        f"o *saltar* para decidir después con /mi_dominio"
+        f"{skills_text}\n\n"
+        f"¿Activo el paquete {domain['name']}?\n\n"
+        f"Responde: si / no / saltar"
     )
     try:
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg)
         # Marcar que ya se preguntó
         from datetime import datetime
         memory.set_domain_pending(user_id, {
@@ -1033,8 +1032,7 @@ async def _handle_domain_selection(user_id: int, text: str, update) -> bool:
         elif any(w in text_lower for w in ["no", "otro", "otras", "opciones", "cambiar", "diferente"]):
             msg = provisioning.get_domains_menu_text()
             await update.message.reply_text(
-                "Claro, ¿cuál prefieres?\n\n" + msg,
-                parse_mode="Markdown"
+                "Claro, ¿cuál prefieres?\n\n" + msg
             )
             memory.set_domain_pending(user_id, {
                 **domain_pending,
@@ -1105,11 +1103,10 @@ async def _activate_domain_pack(user_id: int, domain_id: str, update):
 
     skills_text = "\n".join(f"  {s}" for s in activated)
     await update.message.reply_text(
-        f"✅ *Paquete {domain['emoji']} {domain['name']} activado*\n\n"
+        f"✅ Paquete {domain['emoji']} {domain['name']} activado\n\n"
         f"Skills listas:\n{skills_text}\n\n"
         f"Están personalizadas con tu contexto. "
-        f"Usa /mis_skills para verlas o /mi_dominio para cambiar el paquete.",
-        parse_mode="Markdown"
+        f"Usa /mis_skills para verlas o /mi_dominio para cambiar el paquete."
     )
 
 
@@ -1131,20 +1128,20 @@ async def cmd_mi_dominio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if current_domain:
             skill_names = [s["name"] for s in provisioning.get_domain_skills(current_domain_id)]
             msg = (
-                f"🎯 *Tu paquete actual:* {current_domain['emoji']} *{current_domain['name']}*\n"
-                f"_{current_domain['description']}_\n\n"
-                f"Skills activas del paquete:\n"
+                f"🎯 Tu paquete actual: {current_domain['emoji']} {current_domain['name']}\n"
+                f"{current_domain['description']}\n\n"
+                f"Skills del paquete:\n"
                 + "\n".join(f"  • {n}" for n in skill_names)
-                + "\n\n¿Quieres cambiar de paquete? Responde con el número o nombre:\n\n"
+                + "\n\n¿Quieres cambiarlo?\n\n"
                 + provisioning.get_domains_menu_text()
             )
         else:
             msg = (
-                "🎯 *No tienes un paquete de dominio activo aún.*\n\n"
+                "🎯 No tienes un paquete de dominio activo aún.\n\n"
                 + provisioning.get_domains_menu_text()
             )
 
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text(msg)
 
         # Poner en estado de espera de selección
         from datetime import datetime
@@ -1177,8 +1174,7 @@ async def cmd_mi_dominio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             f"No reconocí '{args}' como dominio.\n\n"
-            + provisioning.get_domains_menu_text(),
-            parse_mode="Markdown"
+            + provisioning.get_domains_menu_text()
         )
 
 
