@@ -290,17 +290,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Mensaje de {user_name} ({user_id}): {user_text}")
 
+    await _process_user_text(update, context, user_text)
+
+
+async def _process_user_text(update, context, user_text: str):
+    user_id = update.effective_user.id
+
     # ── Interceptar selección de dominio pendiente ───────────
     domain_pending = memory.get_domain_pending(user_id)
     if domain_pending.get("asked_at"):
-        handled = await _handle_domain_selection(user_id, update.message.text, update)
+        handled = await _handle_domain_selection(user_id, user_text, update)
         if handled:
             return
 
     # ── Interceptar confirmación de import de memoria ────────
     import_pending = memory.get_category(user_id, "preferencias") or {}
     if import_pending.get("_import_pending"):
-        handled = await _handle_import_confirmation(user_id, update.message.text, update)
+        handled = await _handle_import_confirmation(user_id, user_text, update)
         if handled:
             return
 
