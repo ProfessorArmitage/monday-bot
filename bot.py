@@ -40,6 +40,7 @@ import conversation_context
 import provisioning
 import domain_seeds
 import memory_backup
+import audio_handler
 import identity as identity_module
 import skills as skills_engine
 from scheduler import start_scheduler, init_scheduler
