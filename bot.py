@@ -12,6 +12,7 @@ Stack:
 """
 
 import os
+import io
 import re
 import json
 import logging
@@ -404,9 +405,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     memory.add_message(user_id, "user", user_text)
     memory.add_message(user_id, "assistant", clean_reply)
 
-    # Enviar respuesta
+    # Enviar respuesta (texto o voz según preferencia del usuario)
     if clean_reply:
-        await update.message.reply_text(clean_reply)
+        user_data_pref = memory.get_user(user_id)
+        if audio_handler.user_wants_voice(user_data_pref):
+            await _send_voice_reply(update, user_id, clean_reply)
+        else:
+            await update.message.reply_text(clean_reply)
 
     # Enviar resultado de la acción Google si hay
     if action_result:
@@ -1344,6 +1349,122 @@ async def cmd_importar_memoria(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 
+
+# ── AUDIO — helpers ──────────────────────────────────────────
+
+async def handle_voice_message(update, context):
+    """
+    Handler para mensajes de voz.
+    Descarga el audio, transcribe con Whisper via Groq,
+    y pasa el texto al flujo normal de handle_message.
+    """
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name or "Usuario"
+
+    await update.message.chat.send_action("typing")
+
+    # Descargar audio de Telegram
+    try:
+        voice = update.message.voice
+        tg_file = await context.bot.get_file(voice.file_id)
+        audio_bytes = await tg_file.download_as_bytearray()
+        audio_bytes = bytes(audio_bytes)
+    except Exception as e:
+        logger.error(f"Error descargando audio de {user_id}: {e}")
+        await update.message.reply_text(
+            "No pude descargar el audio. Intenta de nuevo o envía tu mensaje en texto."
+        )
+        return
+
+    # Transcribir
+    transcribed = await audio_handler.transcribe(audio_bytes, filename="audio.ogg")
+
+    if not transcribed:
+        await update.message.reply_text(
+            "No pude entender el audio. "
+            "Intenta hablar más claro o envía tu mensaje en texto."
+        )
+        return
+
+    logger.info(f"Audio transcrito de {user_name} ({user_id}): {transcribed[:80]}")
+
+    # Inyectar texto transcrito en el update para reusar handle_message
+    # Sobrescribimos el texto del mensaje con la transcripción
+    update.message.text = transcribed
+    await handle_message(update, context)
+
+
+async def _send_voice_reply(update, user_id: int, text: str):
+    """
+    Envía la respuesta del bot como mensaje de voz.
+    Si la síntesis falla, cae back a texto.
+    """
+    try:
+        audio_bytes = await audio_handler.synthesize(text)
+        if audio_bytes:
+            await update.message.reply_voice(
+                voice=io.BytesIO(audio_bytes),
+                caption=None,
+            )
+            return
+    except Exception as e:
+        logger.warning(f"TTS falló para usuario {user_id}: {e}")
+
+    # Fallback a texto si TTS falla
+    await update.message.reply_text(text)
+
+
+async def cmd_voz(update, context):
+    """
+    Configurar el modo de respuesta por voz.
+
+    /voz            → ver estado actual
+    /voz activar    → respuestas en audio
+    /voz desactivar → respuestas en texto (default)
+    """
+    user_id = update.effective_user.id
+    args = context.args or []
+    action = args[0].lower() if args else ""
+
+    user_data = memory.get_user(user_id)
+    prefs = memory.get_category(user_id, "preferencias") or {}
+    current = prefs.get("respuesta_en_voz", False)
+
+    if not action:
+        estado = "activado" if current else "desactivado"
+        await update.message.reply_text(
+            f"Respuestas por voz: {estado}\n\n"
+            f"/voz activar   → respuestas en audio\n"
+            f"/voz desactivar → respuestas en texto"
+        )
+        return
+
+    if action == "activar":
+        prefs["respuesta_en_voz"] = True
+        memory.set_category(user_id, "preferencias", prefs)
+        await update.message.reply_text(
+            "Respuestas por voz activadas.\n"
+            "A partir de ahora te contestaré con audio.\n"
+            "Usa /voz desactivar para volver a texto."
+        )
+        return
+
+    if action == "desactivar":
+        prefs["respuesta_en_voz"] = False
+        memory.set_category(user_id, "preferencias", prefs)
+        await update.message.reply_text(
+            "Respuestas por voz desactivadas. Te contestaré en texto."
+        )
+        return
+
+    await update.message.reply_text(
+        "Opciones:\n"
+        "  /voz           → ver estado\n"
+        "  /voz activar   → respuestas en audio\n"
+        "  /voz desactivar → respuestas en texto"
+    )
+
+
 # ── DO NOT DISTURB ────────────────────────────────────────────
 
 async def cmd_dnd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1808,6 +1929,8 @@ async def main():
     telegram_app.add_handler(CommandHandler("nueva_skill", cmd_nueva_skill))
     telegram_app.add_handler(CommandHandler("mis_skills", cmd_mis_skills))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    telegram_app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
+    telegram_app.add_handler(CommandHandler("voz", cmd_voz))
 
     # Iniciar servidor web y bot en paralelo
     await start_web_server()

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.6.0"
+MANIFEST_VERSION = "1.7.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -112,6 +112,14 @@ CHANGELOG = {
             "Snooze rapido: /dnd snooze 1h pausa notificaciones temporalmente",
             "El onboarding ahora pregunta por horarios de silencio preferidos",
             "Todos los jobs del scheduler respetan el modo silencio",
+        ],
+    },
+    "1.7.0": {
+        "titulo": "Mensajes de voz — entrada y salida por audio",
+        "cambios": [
+            "Ahora puedes enviarme mensajes de voz — los transcribo con Whisper via Groq",
+            "Nuevo comando /voz activar para recibir respuestas en audio (gTTS)",
+            "Por default las respuestas siguen siendo en texto",
         ],
     },
     # Ejemplo de cómo agregar la próxima versión:

@@ -5,3 +5,4 @@ psycopg2-binary==2.9.9
 aiohttp==3.9.5
 apscheduler==3.10.4
 packaging==24.1
+gtts==2.5.1
