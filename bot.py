@@ -1093,10 +1093,10 @@ async def _activate_domain_pack(user_id: int, domain_id: str, update):
     memory.set_user_domain(user_id, domain_id)
 
     activated = []
+    user_data = memory.get_user(user_id)
     for skill_data in domain_skills:
-        user_data = memory.get_user(user_id)
         activated_skill = await skills_engine.activate_skill_personalized(
-            user_id, skill_data["id"], user_data, call_groq
+            user_id, skill_data["id"], memory, call_groq
         )
         if activated_skill:
             activated.append(f"{skill_data['emoji']} {skill_data['name']}")
