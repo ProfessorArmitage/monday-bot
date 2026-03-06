@@ -48,7 +48,7 @@ RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "http://localhost:8080")
 PORT               = int(os.getenv("PORT", 8080))
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-    raise ValueError("Falta TELEGRAM_TOKEN o GROQ_API_KEY en el archivo .env")
+    raise ValueError("Falta TELEGRAM_TOKEN o GROQ_API_KEY en las variables de entorno")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -267,10 +267,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if next_question:
             await update.message.reply_text(next_question)
-            # Si onboarding terminó y tiene Google, sincronizar al doc
-            if not onboarding.is_in_onboarding(user_id) and memory.has_google_connected(user_id):
-                import asyncio
-                asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
+            # Si onboarding terminó: sync doc + mostrar sugerencia de dominio
+            if not onboarding.is_in_onboarding(user_id):
+                if memory.has_google_connected(user_id):
+                    asyncio.create_task(workspace_memory.sync_memory_to_doc(user_id))
+                # Mostrar sugerencia de dominio si fue detectado
+                asyncio.create_task(_send_domain_suggestion(user_id, update))
+        return
         return
     # ─────────────────────────────────────────────────────────
     user_id   = update.effective_user.id
@@ -279,6 +282,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Mensaje de {user_name} ({user_id}): {user_text}")
 
+    # ── Interceptar selección de dominio pendiente ───────────
+    domain_pending = memory.get_domain_pending(user_id)
+    if domain_pending.get("asked_at"):
+        handled = await _handle_domain_selection(user_id, update.message.text, update)
+        if handled:
+            return
 
     # Agregar estado de conexión Google al contexto
     google_status = "✅ Conectado" if memory.has_google_connected(user_id) else "❌ No conectado (usa /conectar_google)"
@@ -952,6 +961,227 @@ async def cmd_mi_zona(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+# ── DOMINIO — helpers ─────────────────────────────────────────
+
+async def _send_domain_suggestion(user_id: int, update):
+    """Envía sugerencia de dominio al terminar onboarding."""
+    import asyncio
+    await asyncio.sleep(1)  # pequeño delay para que llegue después del mensaje de bienvenida
+    domain_pending = memory.get_domain_pending(user_id)
+    if not domain_pending.get("suggested"):
+        # No se detectó dominio — mostrar menú genérico
+        msg = (
+            "\n🎯 *Un último detalle* — ¿Cuál describe mejor tu actividad?\n\n"
+            + provisioning.get_domains_menu_text()
+        )
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            pass
+        return
+
+    suggested_id = domain_pending["suggested"]
+    domain = provisioning.get_domain_by_id(suggested_id)
+    if not domain:
+        return
+
+    skill_names = [s["name"] for s in provisioning.get_domain_skills(suggested_id)]
+    skills_text = ", ".join(skill_names)
+
+    msg = (
+        f"\n🎯 *Detecté que trabajas en {domain['name']}* {domain['emoji']}\n\n"
+        f"Tengo un paquete de skills especializadas para ti:\n"
+        f"_{skills_text}_\n\n"
+        f"¿Activo el paquete *{domain['name']}*?\n\n"
+        f"Responde *sí* para activarlo, *no* para ver otras opciones, "
+        f"o *saltar* para decidir después con /mi_dominio"
+    )
+    try:
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        # Marcar que ya se preguntó
+        from datetime import datetime
+        memory.set_domain_pending(user_id, {
+            **domain_pending,
+            "asked_at": datetime.utcnow().isoformat(),
+            "state": "awaiting_confirmation",
+        })
+    except Exception:
+        pass
+
+
+async def _handle_domain_selection(user_id: int, text: str, update) -> bool:
+    """
+    Maneja la respuesta del usuario a la sugerencia de dominio.
+    Retorna True si el mensaje fue consumido por este handler.
+    """
+    domain_pending = memory.get_domain_pending(user_id)
+    if not domain_pending.get("asked_at"):
+        return False
+
+    text_lower = text.strip().lower()
+    state = domain_pending.get("state", "")
+    suggested = domain_pending.get("suggested")
+
+    # Estado: esperando confirmación de la sugerencia
+    if state == "awaiting_confirmation":
+        if any(w in text_lower for w in ["sí", "si", "yes", "ok", "dale", "bueno", "claro", "activar", "activa"]):
+            await _activate_domain_pack(user_id, suggested, update)
+            memory.clear_domain_pending(user_id)
+            return True
+
+        elif any(w in text_lower for w in ["no", "otro", "otras", "opciones", "cambiar", "diferente"]):
+            msg = provisioning.get_domains_menu_text()
+            await update.message.reply_text(
+                "Claro, ¿cuál prefieres?\n\n" + msg,
+                parse_mode="Markdown"
+            )
+            memory.set_domain_pending(user_id, {
+                **domain_pending,
+                "state": "awaiting_selection",
+            })
+            return True
+
+        elif any(w in text_lower for w in ["saltar", "skip", "después", "luego", "omitir"]):
+            memory.clear_domain_pending(user_id)
+            await update.message.reply_text(
+                "Sin problema, puedes activarlo cuando quieras con /mi_dominio 🙌"
+            )
+            return True
+
+        return False  # no consumir — puede ser un mensaje normal
+
+    # Estado: esperando selección del menú numérico
+    if state == "awaiting_selection":
+        domains = provisioning.DOMAINS_CATALOG
+        selected_id = None
+
+        # Respuesta numérica (1-6)
+        if text_lower.strip() in [str(i) for i in range(1, len(domains)+1)]:
+            idx = int(text_lower.strip()) - 1
+            selected_id = domains[idx]["id"]
+        # Respuesta "7" o "general"
+        elif text_lower.strip() in ["7", "general", "ninguno", "sin paquete"]:
+            memory.clear_domain_pending(user_id)
+            await update.message.reply_text(
+                "Perfecto, sin paquete específico. Puedes activarlo después con /mi_dominio ✌️"
+            )
+            return True
+        # Respuesta por nombre
+        else:
+            for d in domains:
+                if d["id"] in text_lower or d["name"].lower() in text_lower:
+                    selected_id = d["id"]
+                    break
+
+        if selected_id:
+            await _activate_domain_pack(user_id, selected_id, update)
+            memory.clear_domain_pending(user_id)
+            return True
+
+        return False  # no reconocido — no consumir
+
+    return False
+
+
+async def _activate_domain_pack(user_id: int, domain_id: str, update):
+    """Activa todas las skills de un paquete de dominio."""
+    import asyncio
+    domain = provisioning.get_domain_by_id(domain_id)
+    if not domain:
+        return
+
+    domain_skills = provisioning.get_domain_skills(domain_id)
+    memory.set_user_domain(user_id, domain_id)
+
+    activated = []
+    for skill_data in domain_skills:
+        user_data = memory.get_user(user_id)
+        activated_skill = await skills_engine.activate_skill_personalized(
+            user_id, skill_data["id"], user_data, call_groq
+        )
+        if activated_skill:
+            activated.append(f"{skill_data['emoji']} {skill_data['name']}")
+
+    skills_text = "\n".join(f"  {s}" for s in activated)
+    await update.message.reply_text(
+        f"✅ *Paquete {domain['emoji']} {domain['name']} activado*\n\n"
+        f"Skills listas:\n{skills_text}\n\n"
+        f"Están personalizadas con tu contexto. "
+        f"Usa /mis_skills para verlas o /mi_dominio para cambiar el paquete.",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_mi_dominio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ver o cambiar el paquete de dominio activo.
+    /mi_dominio            → ver dominio actual + opciones
+    /mi_dominio legal      → activar paquete legal directamente
+    /mi_dominio 3          → activar por número del menú
+    """
+    user_id = update.effective_user.id
+    args = " ".join(context.args).strip().lower() if context.args else ""
+
+    if not args:
+        # Mostrar estado actual
+        current_domain_id = memory.get_user_domain(user_id)
+        current_domain = provisioning.get_domain_by_id(current_domain_id) if current_domain_id else None
+
+        if current_domain:
+            skill_names = [s["name"] for s in provisioning.get_domain_skills(current_domain_id)]
+            msg = (
+                f"🎯 *Tu paquete actual:* {current_domain['emoji']} *{current_domain['name']}*\n"
+                f"_{current_domain['description']}_\n\n"
+                f"Skills activas del paquete:\n"
+                + "\n".join(f"  • {n}" for n in skill_names)
+                + "\n\n¿Quieres cambiar de paquete? Responde con el número o nombre:\n\n"
+                + provisioning.get_domains_menu_text()
+            )
+        else:
+            msg = (
+                "🎯 *No tienes un paquete de dominio activo aún.*\n\n"
+                + provisioning.get_domains_menu_text()
+            )
+
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+        # Poner en estado de espera de selección
+        from datetime import datetime
+        memory.set_domain_pending(user_id, {
+            "suggested": current_domain_id,
+            "asked_at": datetime.utcnow().isoformat(),
+            "state": "awaiting_selection",
+            "source": "command",
+        })
+        return
+
+    # Con argumento — activar directamente
+    domains = provisioning.DOMAINS_CATALOG
+    selected_id = None
+
+    # Por número
+    if args.strip() in [str(i) for i in range(1, len(domains)+1)]:
+        selected_id = domains[int(args.strip())-1]["id"]
+    # Por nombre o id
+    else:
+        for d in domains:
+            if d["id"] in args or d["name"].lower() in args:
+                selected_id = d["id"]
+                break
+
+    if selected_id:
+        await update.message.chat.send_action("typing")
+        await _activate_domain_pack(user_id, selected_id, update)
+        memory.clear_domain_pending(user_id)
+    else:
+        await update.message.reply_text(
+            f"No reconocí '{args}' como dominio.\n\n"
+            + provisioning.get_domains_menu_text(),
+            parse_mode="Markdown"
+        )
+
+
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la versión actual del bot y cuándo se actualizó."""
     user_id = update.effective_user.id
@@ -993,6 +1223,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("mi_doc",    cmd_my_doc))
     telegram_app.add_handler(CommandHandler("sincronizar", cmd_sync_doc))
     telegram_app.add_handler(CommandHandler("version", cmd_version))
+    telegram_app.add_handler(CommandHandler("mi_dominio", cmd_mi_dominio))
     telegram_app.add_handler(CommandHandler("mi_zona", cmd_mi_zona))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))

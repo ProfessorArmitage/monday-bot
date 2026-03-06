@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.2.1"
+MANIFEST_VERSION = "1.3.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -76,6 +76,16 @@ CHANGELOG = {
             "Auto-detección de timezone desde tu Google Calendar si no está configurada",
         ],
         "accion_requerida": "Si tus eventos aparecen con hora incorrecta, usa /mi_zona para corregirla",
+    },
+    "1.3.0": {
+        "titulo": "Skills de dominio — paquetes especializados por industria",
+        "cambios": [
+            "6 paquetes de skills: Legal, Influencer, Corporativo, Ventas, Salud, Educación",
+            "Detección automática de dominio durante el onboarding",
+            "Nuevo comando /mi_dominio para ver y cambiar tu paquete activo",
+            "Los usuarios existentes reciben sugerencia personalizada basada en su perfil",
+        ],
+        "accion_requerida": "domain_suggestion",  # activa flujo de sugerencia
     },
     # Ejemplo de cómo agregar la próxima versión:
     # "1.1.0": {
@@ -236,7 +246,518 @@ SKILLS_CATALOG = [
         "emoji": "🎯",
         "version_added": "1.0.0",
     },
+
+    # ── DOMINIO: LEGAL ────────────────────────────────────────
+    {
+        "id": "legal_drafting",
+        "name": "Redacción legal",
+        "description": "Redactar contratos, cláusulas y documentos legales con lenguaje preciso",
+        "content": (
+            "Cuando {{nombre}} necesite redactar documentos legales, usa lenguaje jurídico preciso "
+            "y formal. Incluye siempre: partes involucradas, objeto, obligaciones, plazos y firma. "
+            "Adapta el nivel técnico al destinatario. Empresa: {{empresa}}. Rol: {{rol}}."
+        ),
+        "trigger": "manual",
+        "emoji": "⚖️",
+        "dominio": "legal",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "legal_risk",
+        "name": "Análisis de riesgo legal",
+        "description": "Identificar riesgos legales en situaciones, contratos o decisiones",
+        "content": (
+            "Cuando {{nombre}} presente una situación o documento para análisis, "
+            "identifica: riesgos legales potenciales, cláusulas problemáticas, "
+            "vacíos jurídicos y recomendaciones de mitigación. "
+            "Sé específico y práctico. Contexto: {{descripcion_trabajo}}."
+        ),
+        "trigger": "trabajo",
+        "emoji": "🔍",
+        "dominio": "legal",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "legal_case_tracker",
+        "name": "Seguimiento de casos",
+        "description": "Organizar y dar seguimiento a casos, expedientes y deadlines legales",
+        "content": (
+            "Ayuda a {{nombre}} a mantener orden en sus casos activos: {{proyectos_activos}}. "
+            "Para cada caso, rastrea: estatus actual, próxima acción, deadline y partes involucradas. "
+            "Prioriza según urgencia legal y fechas de vencimiento."
+        ),
+        "trigger": "trabajo",
+        "emoji": "📂",
+        "dominio": "legal",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "legal_client_comm",
+        "name": "Comunicación con clientes legales",
+        "description": "Redactar comunicados profesionales a clientes sobre temas legales",
+        "content": (
+            "Al redactar comunicaciones de {{nombre}} a clientes legales, "
+            "usa tono profesional pero accesible — evita jerga técnica innecesaria. "
+            "Explica implicaciones prácticas, no solo legales. "
+            "Incluye próximos pasos claros. Contactos clave: {{contactos_clave}}."
+        ),
+        "trigger": "correo",
+        "emoji": "📬",
+        "dominio": "legal",
+        "version_added": "1.3.0",
+    },
+
+    # ── DOMINIO: INFLUENCER ───────────────────────────────────
+    {
+        "id": "influencer_content_calendar",
+        "name": "Calendario de contenido",
+        "description": "Planificar y organizar contenido para redes sociales",
+        "content": (
+            "Ayuda a {{nombre}} a planificar su contenido. "
+            "Considera su meta de la semana ({{meta_semana}}) y proyectos activos ({{proyectos_activos}}). "
+            "Para cada pieza de contenido sugiere: plataforma, formato, hook de apertura, "
+            "mensaje central y call to action. Adapta al tono de su marca: {{tono}}."
+        ),
+        "trigger": "trabajo",
+        "emoji": "📅",
+        "dominio": "influencer",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "influencer_brand_voice",
+        "name": "Voz de marca",
+        "description": "Mantener consistencia en el tono y mensaje de marca personal",
+        "content": (
+            "Cuando {{nombre}} cree contenido o comunicaciones, mantén siempre "
+            "su voz de marca: {{tono}}. Revisa que el mensaje sea auténtico, "
+            "consistente con su narrativa y alineado a su propuesta de valor. "
+            "Sugiere ajustes si el tono se desvía de su identidad de marca."
+        ),
+        "trigger": "manual",
+        "emoji": "✨",
+        "dominio": "influencer",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "influencer_collab_pitch",
+        "name": "Propuesta de colaboración",
+        "description": "Redactar pitches y propuestas de colaboración con marcas",
+        "content": (
+            "Al redactar propuestas de colaboración para {{nombre}}, incluye: "
+            "presentación personal breve, audiencia y alcance, propuesta de valor para la marca, "
+            "formatos de colaboración sugeridos, entregables y condiciones básicas. "
+            "Tono: profesional pero con personalidad. Empresa/marca: {{empresa}}."
+        ),
+        "trigger": "correo",
+        "emoji": "🤝",
+        "dominio": "influencer",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "influencer_analytics_brief",
+        "name": "Brief de métricas",
+        "description": "Resumen de métricas y rendimiento de contenido en el briefing",
+        "content": (
+            "En el briefing de {{nombre}}, incluye una sección de rendimiento: "
+            "qué contenido funcionó mejor esta semana, tendencias de engagement, "
+            "y una recomendación de qué tipo de contenido priorizar hoy "
+            "basándote en sus metas activas: {{meta_semana}}."
+        ),
+        "trigger": "morning",
+        "emoji": "📊",
+        "dominio": "influencer",
+        "version_added": "1.3.0",
+    },
+
+    # ── DOMINIO: CORPORATIVO ──────────────────────────────────
+    {
+        "id": "corp_exec_summary",
+        "name": "Resumen ejecutivo",
+        "description": "Estructurar información compleja en resúmenes ejecutivos claros",
+        "content": (
+            "Cuando {{nombre}} necesite un resumen ejecutivo, usa estructura: "
+            "Situación actual, Problema u oportunidad, Análisis clave, "
+            "Opciones evaluadas, Recomendación y Próximos pasos. "
+            "Máximo 1 página. Lenguaje directo, orientado a decisión. "
+            "Rol: {{rol}} en {{empresa}}."
+        ),
+        "trigger": "manual",
+        "emoji": "📋",
+        "dominio": "corporativo",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "corp_stakeholder_comm",
+        "name": "Comunicación con stakeholders",
+        "description": "Redactar comunicaciones estratégicas para directivos y stakeholders",
+        "content": (
+            "Al redactar comunicaciones de {{nombre}} para stakeholders o directivos, "
+            "prioriza: claridad sobre detalle, impacto sobre proceso, "
+            "y siempre incluye qué se necesita de ellos (decisión, aprobación, información). "
+            "Adapta al nivel del destinatario. Contactos clave: {{contactos_clave}}."
+        ),
+        "trigger": "correo",
+        "emoji": "🏢",
+        "dominio": "corporativo",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "corp_strategic_review",
+        "name": "Revisión estratégica",
+        "description": "Analizar situaciones con enfoque estratégico y de negocio",
+        "content": (
+            "Cuando {{nombre}} presente una situación de negocio, analiza con marco estratégico: "
+            "contexto y datos relevantes, factores internos y externos, "
+            "opciones con pros/contras, riesgo de cada opción y recomendación. "
+            "Conecta siempre con sus metas: {{meta_semana}}. Empresa: {{empresa}}."
+        ),
+        "trigger": "trabajo",
+        "emoji": "🎯",
+        "dominio": "corporativo",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "corp_board_prep",
+        "name": "Preparación de juntas",
+        "description": "Preparar agenda, materiales y puntos clave para juntas directivas",
+        "content": (
+            "Ayuda a {{nombre}} a preparar juntas efectivas. Para cada junta: "
+            "define objetivo claro, agenda con tiempos, materiales necesarios, "
+            "puntos de decisión requeridos y pre-work para participantes. "
+            "Proyectos activos relevantes: {{proyectos_activos}}."
+        ),
+        "trigger": "manual",
+        "emoji": "🗓️",
+        "dominio": "corporativo",
+        "version_added": "1.3.0",
+    },
+
+    # ── DOMINIO: VENTAS ───────────────────────────────────────
+    {
+        "id": "sales_prospect_follow",
+        "name": "Seguimiento de prospectos",
+        "description": "Mantener seguimiento efectivo del pipeline de ventas",
+        "content": (
+            "Ayuda a {{nombre}} a mantener su pipeline activo. "
+            "Para cada prospecto, rastrea: etapa actual, último contacto, "
+            "próxima acción y fecha de seguimiento. "
+            "Prioriza según probabilidad de cierre y valor. "
+            "Proyectos/cuentas activas: {{proyectos_activos}}."
+        ),
+        "trigger": "trabajo",
+        "emoji": "🔭",
+        "dominio": "ventas",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "sales_proposal",
+        "name": "Propuesta comercial",
+        "description": "Redactar propuestas comerciales persuasivas y estructuradas",
+        "content": (
+            "Al redactar propuestas comerciales para {{nombre}}, estructura: "
+            "entendimiento del problema del cliente, solución propuesta, "
+            "beneficios concretos (no características), inversión y ROI esperado, "
+            "casos de éxito relevantes y llamada a la acción clara. "
+            "Empresa: {{empresa}}. Tono: {{tono}}."
+        ),
+        "trigger": "manual",
+        "emoji": "💼",
+        "dominio": "ventas",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "sales_pipeline_brief",
+        "name": "Revisión de pipeline",
+        "description": "Resumen diario del estado del pipeline en el briefing",
+        "content": (
+            "En el briefing de {{nombre}}, incluye revisión de pipeline: "
+            "prospectos que requieren acción hoy, deals en riesgo de enfriarse, "
+            "y meta de cierre de la semana: {{meta_semana}}. "
+            "Sugiere la acción de mayor impacto para el día."
+        ),
+        "trigger": "morning",
+        "emoji": "📈",
+        "dominio": "ventas",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "sales_client_comm",
+        "name": "Comunicación con clientes",
+        "description": "Redactar seguimientos, check-ins y comunicaciones de ventas",
+        "content": (
+            "Al redactar comunicaciones de ventas para {{nombre}}, "
+            "usa tono consultivo — ayuda primero, vende después. "
+            "Cada mensaje debe tener un objetivo claro y un siguiente paso específico. "
+            "Personaliza según el historial del cliente. Contactos: {{contactos_clave}}."
+        ),
+        "trigger": "correo",
+        "emoji": "💬",
+        "dominio": "ventas",
+        "version_added": "1.3.0",
+    },
+
+    # ── DOMINIO: SALUD ────────────────────────────────────────
+    {
+        "id": "health_patient_notes",
+        "name": "Notas de consulta",
+        "description": "Estructurar notas clínicas y de consulta de forma clara",
+        "content": (
+            "Cuando {{nombre}} registre notas de consulta, estructura: "
+            "motivo de consulta, antecedentes relevantes, evaluación/hallazgos, "
+            "diagnóstico o impresión, plan de tratamiento y próxima cita. "
+            "Usa lenguaje clínico apropiado. Rol: {{rol}} en {{empresa}}."
+        ),
+        "trigger": "manual",
+        "emoji": "🩺",
+        "dominio": "salud",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "health_clinical_follow",
+        "name": "Seguimiento clínico",
+        "description": "Dar seguimiento a pacientes y tratamientos activos",
+        "content": (
+            "Ayuda a {{nombre}} a mantener seguimiento de sus pacientes/casos activos: "
+            "{{proyectos_activos}}. Para cada caso: estatus del tratamiento, "
+            "adherencia observada, alertas o cambios relevantes y próxima revisión. "
+            "Prioriza casos de mayor riesgo o urgencia clínica."
+        ),
+        "trigger": "trabajo",
+        "emoji": "📋",
+        "dominio": "salud",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "health_patient_comm",
+        "name": "Comunicación con pacientes",
+        "description": "Redactar comunicaciones claras y empáticas para pacientes",
+        "content": (
+            "Al redactar comunicaciones de {{nombre}} para pacientes, "
+            "usa lenguaje claro, empático y accesible — sin tecnicismos innecesarios. "
+            "Explica el qué y el por qué de indicaciones. "
+            "Incluye siempre: qué hacer, cuándo y a quién contactar ante dudas."
+        ),
+        "trigger": "correo",
+        "emoji": "💙",
+        "dominio": "salud",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "health_agenda_brief",
+        "name": "Brief de agenda clínica",
+        "description": "Resumen de la agenda del día con preparación por paciente",
+        "content": (
+            "En el briefing de {{nombre}}, incluye revisión de agenda clínica: "
+            "citas del día con notas de preparación relevantes, "
+            "seguimientos pendientes de ayer y alertas de pacientes prioritarios. "
+            "Meta de la semana: {{meta_semana}}."
+        ),
+        "trigger": "morning",
+        "emoji": "🏥",
+        "dominio": "salud",
+        "version_added": "1.3.0",
+    },
+
+    # ── DOMINIO: EDUCACIÓN ────────────────────────────────────
+    {
+        "id": "edu_lesson_prep",
+        "name": "Preparación de clases",
+        "description": "Planificar y estructurar clases, sesiones o talleres",
+        "content": (
+            "Ayuda a {{nombre}} a preparar sus clases o sesiones. "
+            "Para cada sesión estructura: objetivo de aprendizaje, "
+            "contenido principal, actividades o dinámicas, materiales necesarios "
+            "y cómo medir que el objetivo se cumplió. "
+            "Adapta al nivel de los estudiantes/coachees. Rol: {{rol}}."
+        ),
+        "trigger": "trabajo",
+        "emoji": "📚",
+        "dominio": "educacion",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "edu_student_follow",
+        "name": "Seguimiento de alumnos",
+        "description": "Dar seguimiento al progreso de alumnos o coachees",
+        "content": (
+            "Ayuda a {{nombre}} a mantener seguimiento de sus alumnos/coachees: "
+            "{{proyectos_activos}}. Para cada persona: progreso observado, "
+            "áreas de mejora, logros recientes y próxima intervención necesaria. "
+            "Celebra avances y detecta quién necesita más atención."
+        ),
+        "trigger": "manual",
+        "emoji": "👥",
+        "dominio": "educacion",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "edu_content_creation",
+        "name": "Creación de material",
+        "description": "Crear material educativo, guías y recursos de aprendizaje",
+        "content": (
+            "Cuando {{nombre}} cree material educativo, asegura: "
+            "objetivo claro de aprendizaje, estructura lógica y progresiva, "
+            "ejemplos concretos y aplicables, y actividades de práctica. "
+            "Adapta complejidad al nivel de la audiencia. Tono: {{tono}}."
+        ),
+        "trigger": "manual",
+        "emoji": "✏️",
+        "dominio": "educacion",
+        "version_added": "1.3.0",
+    },
+    {
+        "id": "edu_comm",
+        "name": "Comunicación educativa",
+        "description": "Redactar comunicaciones con alumnos, padres o instituciones",
+        "content": (
+            "Al redactar comunicaciones de {{nombre}} en contexto educativo, "
+            "usa tono profesional y empático. Para alumnos: motivador y claro. "
+            "Para padres: transparente y colaborativo. Para instituciones: formal. "
+            "Incluye siempre próximos pasos concretos. Contactos: {{contactos_clave}}."
+        ),
+        "trigger": "correo",
+        "emoji": "📩",
+        "dominio": "educacion",
+        "version_added": "1.3.0",
+    },
 ]
+
+# ── CATÁLOGO DE DOMINIOS ──────────────────────────────────────
+# Cada dominio agrupa un paquete de skills relacionadas.
+# Para agregar un dominio nuevo:
+#   1. Agregar entrada aquí con su id, nombre, descripción y skill_ids
+#   2. Agregar las skills correspondientes en SKILLS_CATALOG (con "dominio": "id")
+#   3. Bump MANIFEST_VERSION MINOR + CHANGELOG + deploy
+DOMAINS_CATALOG = [
+    {
+        "id": "legal",
+        "name": "Legal",
+        "emoji": "⚖️",
+        "description": "Abogados, notarios, consultores legales",
+        "keywords": ["abogado", "legal", "derecho", "jurídico", "notario", "litigios",
+                     "contratos", "bufete", "firma legal", "compliance"],
+        "skill_ids": ["legal_drafting", "legal_risk", "legal_case_tracker", "legal_client_comm"],
+    },
+    {
+        "id": "influencer",
+        "name": "Influencer / Creador",
+        "emoji": "🎬",
+        "description": "Creadores de contenido, influencers, personal brand",
+        "keywords": ["influencer", "creador", "contenido", "redes sociales", "youtube",
+                     "instagram", "tiktok", "marca personal", "community", "streaming"],
+        "skill_ids": ["influencer_content_calendar", "influencer_brand_voice",
+                      "influencer_collab_pitch", "influencer_analytics_brief"],
+    },
+    {
+        "id": "corporativo",
+        "name": "Corporativo",
+        "emoji": "🏢",
+        "description": "Ejecutivos, gerentes, líderes de área en empresas",
+        "keywords": ["director", "gerente", "ejecutivo", "corporativo", "empresa",
+                     "junta", "board", "estrategia", "operaciones", "c-suite", "vp"],
+        "skill_ids": ["corp_exec_summary", "corp_stakeholder_comm",
+                      "corp_strategic_review", "corp_board_prep"],
+    },
+    {
+        "id": "ventas",
+        "name": "Ventas",
+        "emoji": "💼",
+        "description": "Vendedores, account managers, equipos comerciales",
+        "keywords": ["ventas", "comercial", "prospecto", "cliente", "pipeline",
+                     "cierre", "cuenta", "revenue", "cuota", "deal", "crm"],
+        "skill_ids": ["sales_prospect_follow", "sales_proposal",
+                      "sales_pipeline_brief", "sales_client_comm"],
+    },
+    {
+        "id": "salud",
+        "name": "Salud / Wellness",
+        "emoji": "🩺",
+        "description": "Médicos, nutriólogos, psicólogos, entrenadores, terapeutas",
+        "keywords": ["médico", "doctor", "salud", "paciente", "clínica", "nutriólogo",
+                     "psicólogo", "terapeuta", "wellness", "entrenador", "consultorio"],
+        "skill_ids": ["health_patient_notes", "health_clinical_follow",
+                      "health_patient_comm", "health_agenda_brief"],
+    },
+    {
+        "id": "educacion",
+        "name": "Educación / Coaching",
+        "emoji": "📚",
+        "description": "Profesores, coaches, consultores, formadores",
+        "keywords": ["profesor", "maestro", "coach", "educación", "enseñanza",
+                     "alumno", "estudiante", "capacitación", "formación", "taller", "curso"],
+        "skill_ids": ["edu_lesson_prep", "edu_student_follow",
+                      "edu_content_creation", "edu_comm"],
+    },
+]
+
+# ── HELPERS DE DOMINIO ────────────────────────────────────────
+
+def get_domain_by_id(domain_id: str) -> dict | None:
+    """Devuelve el dominio del catálogo por su id."""
+    return next((d for d in DOMAINS_CATALOG if d["id"] == domain_id), None)
+
+def get_domain_skills(domain_id: str) -> list[dict]:
+    """Devuelve las skills del catálogo que pertenecen a un dominio."""
+    domain = get_domain_by_id(domain_id)
+    if not domain:
+        return []
+    ids = set(domain["skill_ids"])
+    return [s for s in SKILLS_CATALOG if s.get("id") in ids]
+
+def get_domains_menu_text() -> str:
+    """Genera el texto del menú de selección de dominio para enviar al usuario."""
+    lines = ["*Elige el paquete que mejor describe tu actividad:*\n"]
+    for i, d in enumerate(DOMAINS_CATALOG, 1):
+        lines.append(f"{i}\u20e3 {d['emoji']} *{d['name']}*")
+        lines.append(f"   _{d['description']}_")
+    lines.append("\n7\u20e3 \U0001f513 *General* _(sin paquete específico)_")
+    lines.append("\nResponde con el número o usa /mi_dominio más adelante.")
+    return "\n".join(lines)
+
+async def infer_domain_from_memory(user_data: dict, call_groq_fn) -> str | None:
+    """
+    Usa Groq para inferir el dominio del usuario a partir de su memoria.
+    Devuelve el id del dominio o None si no puede inferirlo con confianza.
+    """
+    trabajo = user_data.get("trabajo", {})
+    identidad = user_data.get("identidad", {})
+    proyectos = user_data.get("proyectos", [])
+
+    context = (
+        f"Rol: {trabajo.get('rol', '')}\n"
+        f"Empresa: {trabajo.get('empresa', '')}\n"
+        f"Descripción: {trabajo.get('descripcion', '')}\n"
+        f"Proyectos: {', '.join(p.get('nombre', '') if isinstance(p, dict) else str(p) for p in proyectos[:3])}\n"
+        f"Profesión: {identidad.get('profesion', '')}"
+    )
+
+    domain_ids = [d["id"] for d in DOMAINS_CATALOG]
+    keywords_map = {d["id"]: d["keywords"] for d in DOMAINS_CATALOG}
+
+    prompt = f"""Analiza este perfil profesional y determina a qué dominio pertenece.
+
+PERFIL:
+{context}
+
+DOMINIOS DISPONIBLES: {", ".join(domain_ids)}
+PALABRAS CLAVE POR DOMINIO: {keywords_map}
+
+Responde SOLO con el id del dominio más probable, o "general" si no hay suficiente información.
+No expliques nada. Solo el id. Ejemplo: legal"""
+
+    try:
+        result = await call_groq_fn(
+            "Eres un clasificador de perfiles profesionales. Responde solo con el id del dominio.",
+            [],
+            prompt
+        )
+        result = result.strip().lower().strip('"').strip("'")
+        if result in domain_ids:
+            return result
+        return None
+    except Exception:
+        return None
+
 
 # ── PASOS DE ONBOARDING VERSIONADOS ──────────────────────────
 # Si agregas pasos nuevos en una versión MAJOR, los usuarios existentes
@@ -269,6 +790,65 @@ def get_pending_changelog(from_version: str) -> list[str]:
                 changes.append(f"  👉 {entry['accion_requerida']}")
     return changes
 
+
+
+async def _suggest_domain_to_existing_user(user_id: int, user_data: dict, memory_module, bot):
+    """
+    Para usuarios existentes en reprovisión: Groq infiere dominio,
+    pero también se hace matching por keywords como fallback.
+    Envía mensaje con sugerencia personalizada o menú genérico.
+    """
+    from datetime import datetime
+
+    trabajo = user_data.get("trabajo", {})
+    text = " ".join([
+        str(trabajo.get("rol", "")),
+        str(trabajo.get("empresa", "")),
+        str(trabajo.get("descripcion", "")),
+    ]).lower()
+
+    # Match por keywords
+    best_domain = None
+    best_score = 0
+    for domain in DOMAINS_CATALOG:
+        score = sum(1 for kw in domain["keywords"] if kw in text)
+        if score > best_score:
+            best_score = score
+            best_domain = domain["id"]
+
+    from datetime import datetime
+    pending_state = {
+        "asked_at": datetime.utcnow().isoformat(),
+        "source": "reprovisioning",
+    }
+
+    if best_domain and best_score > 0:
+        domain = get_domain_by_id(best_domain)
+        skill_names = [s["name"] for s in get_domain_skills(best_domain)]
+        msg = (
+            f"\n🎯 *Novedad — Paquetes de skills por dominio*\n\n"
+            f"Basándome en tu perfil, creo que el paquete "
+            f"*{domain['emoji']} {domain['name']}* es para ti:\n"
+            f"_{', '.join(skill_names)}_\n\n"
+            f"¿Lo activo? Responde *sí*, *no* para ver otras opciones, "
+            f"o *saltar* para después con /mi_dominio"
+        )
+        pending_state["suggested"] = best_domain
+        pending_state["state"] = "awaiting_confirmation"
+    else:
+        msg = (
+            f"\n🎯 *Novedad — Paquetes de skills por dominio*\n\n"
+            f"Ahora tengo skills especializadas según tu área de trabajo.\n\n"
+            + get_domains_menu_text()
+        )
+        pending_state["suggested"] = None
+        pending_state["state"] = "awaiting_selection"
+
+    try:
+        await bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
+        memory_module.set_domain_pending(user_id, pending_state)
+    except Exception as e:
+        logger.warning(f"No se pudo enviar sugerencia de dominio a {user_id}: {e}")
 
 async def reprovision_user(user_id: int, memory_module, bot=None) -> bool:
     """
@@ -304,6 +884,16 @@ async def reprovision_user(user_id: int, memory_module, bot=None) -> bool:
                 + "\n\nTu memoria personal está intacta — no perdiste nada."
             )
             await bot.send_message(chat_id=user_id, text=msg)
+
+            # Si el cambio incluye domain_suggestion y el usuario no tiene dominio
+            needs_domain = any(
+                CHANGELOG.get(v, {}).get("accion_requerida") == "domain_suggestion"
+                for v in CHANGELOG
+                if _version_lt(current_version, v)
+            )
+            if needs_domain and memory_module.get_user_domain(user_id) is None:
+                await _suggest_domain_to_existing_user(user_id, user, memory_module, bot)
+
         except Exception as e:
             logger.warning(f"No se pudo notificar al usuario {user_id}: {e}")
 

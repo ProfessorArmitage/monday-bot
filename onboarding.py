@@ -287,12 +287,51 @@ async def process_answer(user_id: int, answer: str, call_groq_fn) -> str:
     if next_index >= len(STEPS):
         # Onboarding completo
         memory.complete_onboarding(user_id)
+        # Sugerir dominio basado en lo que respondió en el paso "trabajo"
+        _set_domain_suggestion(user_id)
         return _build_completion_message(user_id)
 
     # Devolver siguiente pregunta con progreso
     next_step = STEPS[next_index]
     progress = f"({next_index + 1}/{len(STEPS)})"
     return f"{progress} {next_step['pregunta']}"
+
+
+
+def _set_domain_suggestion(user_id: int):
+    """
+    Analiza la memoria del usuario recién onboardeado e infiere el dominio
+    más probable usando keywords. Guarda la sugerencia en domain_pending.
+    No llama a Groq — usa matching de keywords para no bloquear el flujo.
+    """
+    import provisioning as prov
+    user = memory.get_user(user_id)
+    trabajo = user.get("trabajo", {})
+
+    # Texto a analizar
+    text = " ".join([
+        str(trabajo.get("rol", "")),
+        str(trabajo.get("empresa", "")),
+        str(trabajo.get("descripcion", "")),
+        str(trabajo.get("equipo", "")),
+    ]).lower()
+
+    # Match por keywords
+    best_domain = None
+    best_score = 0
+    for domain in prov.DOMAINS_CATALOG:
+        score = sum(1 for kw in domain["keywords"] if kw in text)
+        if score > best_score:
+            best_score = score
+            best_domain = domain["id"]
+
+    if best_domain and best_score > 0:
+        from datetime import datetime
+        memory.set_domain_pending(user_id, {
+            "suggested": best_domain,
+            "asked_at": datetime.utcnow().isoformat(),
+            "source": "onboarding",
+        })
 
 
 def _build_completion_message(user_id: int) -> str:

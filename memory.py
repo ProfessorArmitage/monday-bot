@@ -67,6 +67,8 @@ def _init_db():
                     -- Metadata
                     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
                     last_seen         TIMESTAMP NOT NULL DEFAULT NOW(),
+                    -- Dominio activo del usuario
+                    domain_pending    JSONB NOT NULL DEFAULT '{}'  -- {"suggested": "legal", "asked_at": "..."},
                     -- Reprovisión
                     bot_version       TEXT NOT NULL DEFAULT '0.0.0',
                     last_reprovisioned TIMESTAMP DEFAULT NULL,
@@ -463,6 +465,42 @@ def set_bot_version(user_id: int, version: str):
                 (version, datetime.now(), user_id)
             )
             conn.commit()
+
+
+def get_user_domain(user_id: int) -> str | None:
+    """Devuelve el dominio activo del usuario (ej. 'legal', 'ventas') o None."""
+    user = get_user(user_id)
+    return user.get("preferencias", {}).get("dominio")
+
+def set_user_domain(user_id: int, domain_id: str | None):
+    """Guarda el dominio activo en preferencias del usuario."""
+    prefs = get_category(user_id, "preferencias") or {}
+    if domain_id:
+        prefs["dominio"] = domain_id
+    else:
+        prefs.pop("dominio", None)
+    set_category(user_id, "preferencias", prefs)
+
+def get_domain_pending(user_id: int) -> dict:
+    """Devuelve el estado de sugerencia de dominio pendiente."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT domain_pending FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row and row[0] else {}
+
+def set_domain_pending(user_id: int, state: dict):
+    """Guarda el estado de sugerencia de dominio pendiente."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET domain_pending = %s WHERE user_id = %s",
+                (json.dumps(state), user_id)
+            )
+
+def clear_domain_pending(user_id: int):
+    """Limpia el estado de sugerencia pendiente."""
+    set_domain_pending(user_id, {})
 
 
 def get_system_overrides(user_id: int) -> dict:
