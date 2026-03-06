@@ -102,8 +102,10 @@ Usa null para lo que no se mencione.
         "id": "ritmo",
         "categoria": "ritmo",
         "pregunta": (
-            "Ayúdame a entender tu ritmo. ¿A qué hora sueles empezar tu día de trabajo? "
-            "¿Tienes días de descanso fijos? ¿A qué hora prefieres recibir tu resumen diario?"
+            "Ayúdame a entender tu ritmo. ¿A qué hora sueles empezar y terminar tu día? "
+            "¿Tienes días de descanso fijos? ¿A qué hora prefieres recibir tu resumen diario? "
+            "¿Hay horarios en los que prefieres no recibir notificaciones del bot "
+            "(por ejemplo, después de las 9pm o los fines de semana)?"
         ),
         "extractor": """
 Extrae información sobre el ritmo y horarios del usuario.
@@ -113,8 +115,16 @@ Responde SOLO con JSON:
   "fin_dia": "HH:MM",
   "briefing_hora": "HH:MM",
   "dias_libres": ["sábado", "domingo"],
-  "zona_horaria": "IANA_timezone_string"
+  "zona_horaria": "IANA_timezone_string",
+  "dnd": {
+    "enabled": true,
+    "start": "HH:MM",
+    "end": "HH:MM",
+    "dias_libres": ["sábado", "domingo"],
+    "snooze_until": null
+  }
 }
+Para dnd: si el usuario mencionó que no quiere notificaciones en ciertos horarios, enabled=true y pon start/end con esas horas. dias_libres en dnd son los días sin notificaciones (pueden ser los mismos que dias_libres global). Si no mencionó preferencias de silencio, pon dnd como null.
 Para zona_horaria, usa el nombre IANA correcto según la ciudad del usuario:
 - México DF / CDMX / Guadalajara → America/Mexico_City
 - Monterrey → America/Monterrey

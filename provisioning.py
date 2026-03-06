@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.5.0"
+MANIFEST_VERSION = "1.6.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -103,6 +103,15 @@ CHANGELOG = {
             "Comando /exportar_memoria — genera respaldo JSON en tu Drive",
             "Comando /importar_memoria — restaura tu memoria desde un respaldo",
             "Respaldo automatico cada domingo con retencion de 4 semanas",
+        ],
+    },
+    "1.6.0": {
+        "titulo": "Modo silencio (Do Not Disturb)",
+        "cambios": [
+            "Nuevo comando /dnd para configurar horarios sin notificaciones",
+            "Snooze rapido: /dnd snooze 1h pausa notificaciones temporalmente",
+            "El onboarding ahora pregunta por horarios de silencio preferidos",
+            "Todos los jobs del scheduler respetan el modo silencio",
         ],
     },
     # Ejemplo de cómo agregar la próxima versión:

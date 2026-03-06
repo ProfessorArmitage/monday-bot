@@ -1343,6 +1343,187 @@ async def cmd_importar_memoria(update: Update, context: ContextTypes.DEFAULT_TYP
     memory.set_category(user_id, "preferencias", prefs)
 
 
+
+# ── DO NOT DISTURB ────────────────────────────────────────────
+
+async def cmd_dnd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Configurar el modo silencio (Do Not Disturb).
+
+    /dnd                        → ver estado actual
+    /dnd activar 22:00 07:00    → activar con horario nocturno
+    /dnd activar 22:00 07:00 sabado domingo  → activar + dias sin notificaciones
+    /dnd desactivar             → desactivar DND (sigue el horario pero no silencia)
+    /dnd dias sabado domingo    → configurar dias sin notificaciones
+    /dnd snooze 1h              → silenciar 1 hora (tambien: 30m, 2h, 3h)
+    /dnd snooze off             → cancelar snooze activo
+    """
+    user_id = update.effective_user.id
+    args = context.args or []
+    action = args[0].lower() if args else ""
+
+    user_data = memory.get_user(user_id)
+    ritmo = memory.get_category(user_id, "ritmo") or {}
+    dnd = ritmo.get("dnd", {}) or {}
+
+    # ── Ver estado ──
+    if not action:
+        await update.message.reply_text(tz_utils.dnd_status_text(user_data))
+        return
+
+    # ── Activar con horario ──
+    if action == "activar":
+        if len(args) < 3:
+            await update.message.reply_text(
+                "Uso: /dnd activar HH:MM HH:MM\n"
+                "Ejemplo: /dnd activar 22:00 07:00\n"
+                "Opcional: agrega dias al final — /dnd activar 22:00 07:00 sabado domingo"
+            )
+            return
+
+        start = args[1]
+        end = args[2]
+
+        # Validar formato HH:MM
+        import re as _re
+        if not _re.match(r'^\d{1,2}:\d{2}$', start) or not _re.match(r'^\d{1,2}:\d{2}$', end):
+            await update.message.reply_text(
+                "Formato de hora inválido. Usa HH:MM, por ejemplo 22:00 o 07:00."
+            )
+            return
+
+        # Dias opcionales (resto de args después de las horas)
+        dias_map = {
+            "lunes": "lunes", "martes": "martes", "miercoles": "miércoles",
+            "miércoles": "miércoles", "jueves": "jueves", "viernes": "viernes",
+            "sabado": "sábado", "sábado": "sábado", "domingo": "domingo",
+        }
+        dias = []
+        for a in args[3:]:
+            d = dias_map.get(a.lower())
+            if d:
+                dias.append(d)
+
+        dnd["enabled"] = True
+        dnd["start"] = start
+        dnd["end"] = end
+        if dias:
+            dnd["dias_libres"] = dias
+        elif "dias_libres" not in dnd:
+            dnd["dias_libres"] = []
+
+        ritmo["dnd"] = dnd
+        memory.set_category(user_id, "ritmo", ritmo)
+
+        dias_txt = f"\nDias sin notificaciones: {', '.join(dias)}" if dias else ""
+        await update.message.reply_text(
+            f"Modo silencio activado.\n"
+            f"Horario: {start} – {end}{dias_txt}\n\n"
+            f"No te mandaré notificaciones en ese horario.\n"
+            f"Usa /dnd desactivar para quitar el silencio."
+        )
+        return
+
+    # ── Desactivar ──
+    if action == "desactivar":
+        dnd["enabled"] = False
+        dnd.pop("snooze_until", None)
+        ritmo["dnd"] = dnd
+        memory.set_category(user_id, "ritmo", ritmo)
+        await update.message.reply_text(
+            "Modo silencio desactivado. Recibirás notificaciones normalmente."
+        )
+        return
+
+    # ── Configurar dias ──
+    if action == "dias":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Uso: /dnd dias sabado domingo\n"
+                "Dias disponibles: lunes, martes, miercoles, jueves, viernes, sabado, domingo"
+            )
+            return
+        dias_map = {
+            "lunes": "lunes", "martes": "martes", "miercoles": "miércoles",
+            "miércoles": "miércoles", "jueves": "jueves", "viernes": "viernes",
+            "sabado": "sábado", "sábado": "sábado", "domingo": "domingo",
+        }
+        dias = [dias_map[a.lower()] for a in args[1:] if a.lower() in dias_map]
+        if not dias:
+            await update.message.reply_text("No reconocí los dias. Usa: sabado, domingo, lunes, etc.")
+            return
+        dnd["dias_libres"] = dias
+        ritmo["dnd"] = dnd
+        memory.set_category(user_id, "ritmo", ritmo)
+        await update.message.reply_text(
+            f"Dias sin notificaciones: {', '.join(dias)}"
+        )
+        return
+
+    # ── Snooze ──
+    if action == "snooze":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Uso: /dnd snooze 1h\n"
+                "Opciones: 30m, 1h, 2h, 3h, 4h\n"
+                "/dnd snooze off — cancelar snooze"
+            )
+            return
+
+        snooze_arg = args[1].lower()
+
+        if snooze_arg == "off":
+            dnd.pop("snooze_until", None)
+            ritmo["dnd"] = dnd
+            memory.set_category(user_id, "ritmo", ritmo)
+            await update.message.reply_text("Snooze cancelado. Recibirás notificaciones normalmente.")
+            return
+
+        # Parsear duración
+        import re as _re
+        from datetime import datetime, timezone as _tz, timedelta
+        m = _re.match(r'^(\d+)(m|h)$', snooze_arg)
+        if not m:
+            await update.message.reply_text(
+                "Formato no reconocido. Usa: 30m, 1h, 2h, 3h\n"
+                "Ejemplo: /dnd snooze 2h"
+            )
+            return
+
+        amount = int(m.group(1))
+        unit = m.group(2)
+        if unit == "h":
+            delta = timedelta(hours=min(amount, 12))  # máximo 12h
+        else:
+            delta = timedelta(minutes=min(amount, 120))  # máximo 120m
+
+        until = datetime.now(_tz.utc) + delta
+        dnd["snooze_until"] = until.isoformat()
+        ritmo["dnd"] = dnd
+        memory.set_category(user_id, "ritmo", ritmo)
+
+        duration_txt = f"{amount} {'hora' if unit == 'h' else 'minuto'}{'s' if amount > 1 else ''}"
+        until_local = tz_utils.to_user_tz(until, user_data)
+        until_txt = until_local.strftime("%H:%M")
+        await update.message.reply_text(
+            f"Silencio por {duration_txt}.\n"
+            f"Notificaciones pausadas hasta las {until_txt}.\n"
+            f"Usa /dnd snooze off para cancelar antes."
+        )
+        return
+
+    # Argumento no reconocido
+    await update.message.reply_text(
+        "Opciones de /dnd:\n"
+        "  /dnd                      → ver estado\n"
+        "  /dnd activar 22:00 07:00  → activar horario\n"
+        "  /dnd desactivar           → desactivar\n"
+        "  /dnd snooze 1h            → silenciar 1 hora\n"
+        "  /dnd snooze off           → cancelar snooze\n"
+        "  /dnd dias sabado domingo  → dias sin notificaciones"
+    )
+
+
 # ── ADMIN ─────────────────────────────────────────────────────
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1620,6 +1801,7 @@ async def main():
     telegram_app.add_handler(CommandHandler("admin", cmd_admin))
     telegram_app.add_handler(CommandHandler("exportar_memoria", cmd_exportar_memoria))
     telegram_app.add_handler(CommandHandler("importar_memoria", cmd_importar_memoria))
+    telegram_app.add_handler(CommandHandler("dnd", cmd_dnd))
     telegram_app.add_handler(CommandHandler("mi_zona", cmd_mi_zona))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))

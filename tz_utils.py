@@ -246,3 +246,130 @@ def infer_tz_from_city(city: str) -> str | None:
         if known_city in city_lower or city_lower in known_city:
             return tz
     return None
+
+
+# ── DO NOT DISTURB ────────────────────────────────────────────
+# La configuración DND vive en ritmo.dnd del usuario:
+# {
+#   "enabled": true,
+#   "start": "22:00",   -- hora de inicio (hora local del usuario)
+#   "end": "07:00",     -- hora de fin
+#   "dias_libres": ["sábado", "domingo"],  -- días sin notificaciones
+#   "snooze_until": "2026-03-06T15:00:00+00:00"  -- snooze temporal (UTC ISO)
+# }
+
+def is_dnd_active(user_data: dict) -> tuple[bool, str]:
+    """
+    Devuelve (True, razón) si el usuario tiene DND activo ahora mismo.
+    Devuelve (False, "") si puede recibir notificaciones.
+
+    Considera en orden:
+      1. Snooze temporal (tiene prioridad sobre todo)
+      2. DND desactivado → siempre False
+      3. Día libre
+      4. Ventana horaria (soporta rangos que cruzan medianoche)
+    """
+    from datetime import datetime, timezone as _tz
+    import re as _re
+
+    ritmo = user_data.get("ritmo", {}) or {}
+    dnd = ritmo.get("dnd", {}) or {}
+
+    # 1. Snooze activo
+    snooze_until = dnd.get("snooze_until")
+    if snooze_until:
+        try:
+            until_dt = datetime.fromisoformat(snooze_until)
+            if until_dt.tzinfo is None:
+                until_dt = until_dt.replace(tzinfo=_tz.utc)
+            now_utc = datetime.now(_tz.utc)
+            if now_utc < until_dt:
+                remaining = int((until_dt - now_utc).total_seconds() / 60)
+                return True, f"snooze activo ({remaining} min restantes)"
+            # Snooze expiró — limpiar en memoria no es responsabilidad de tz_utils
+        except Exception:
+            pass
+
+    # 2. DND desactivado
+    if not dnd.get("enabled"):
+        return False, ""
+
+    # 3. Hora local del usuario
+    user_now = now_for_user(user_data)
+    day_name = user_now.strftime("%A").lower()  # monday, tuesday...
+
+    # Mapa español de días
+    day_es = {
+        "monday": "lunes", "tuesday": "martes", "wednesday": "miércoles",
+        "thursday": "jueves", "friday": "viernes",
+        "saturday": "sábado", "sunday": "domingo",
+    }.get(day_name, day_name)
+
+    dias_libres = [d.lower() for d in dnd.get("dias_libres", [])]
+    if day_es in dias_libres:
+        return True, f"día libre ({day_es})"
+
+    # 4. Ventana horaria
+    start_str = dnd.get("start", "")
+    end_str = dnd.get("end", "")
+    if not start_str or not end_str:
+        return False, ""
+
+    try:
+        sh, sm = [int(x) for x in start_str.split(":")]
+        eh, em = [int(x) for x in end_str.split(":")]
+        start_mins = sh * 60 + sm
+        end_mins = eh * 60 + em
+        now_mins = user_now.hour * 60 + user_now.minute
+
+        # Rango normal (ej. 09:00 – 18:00)
+        if start_mins <= end_mins:
+            in_window = start_mins <= now_mins < end_mins
+        else:
+            # Rango que cruza medianoche (ej. 22:00 – 07:00)
+            in_window = now_mins >= start_mins or now_mins < end_mins
+
+        if in_window:
+            return True, f"horario DND ({start_str} – {end_str})"
+    except Exception:
+        pass
+
+    return False, ""
+
+
+def dnd_status_text(user_data: dict) -> str:
+    """Devuelve un texto legible del estado DND actual del usuario."""
+    ritmo = user_data.get("ritmo", {}) or {}
+    dnd = ritmo.get("dnd", {}) or {}
+
+    if not dnd:
+        return "No tienes horario de silencio configurado."
+
+    active, reason = is_dnd_active(user_data)
+    status = "ACTIVO ahora" if active else "inactivo ahora"
+
+    lines = [f"Modo silencio: {status}"]
+    if dnd.get("enabled"):
+        lines.append(f"Horario: {dnd.get('start', '?')} – {dnd.get('end', '?')}")
+    else:
+        lines.append("Notificaciones: activadas")
+
+    dias = dnd.get("dias_libres", [])
+    if dias:
+        lines.append(f"Dias sin notificaciones: {', '.join(dias)}")
+
+    snooze = dnd.get("snooze_until")
+    if snooze:
+        from datetime import datetime, timezone as _tz
+        try:
+            until_dt = datetime.fromisoformat(snooze)
+            if until_dt.tzinfo is None:
+                until_dt = until_dt.replace(tzinfo=_tz.utc)
+            now_utc = datetime.now(_tz.utc)
+            if now_utc < until_dt:
+                mins = int((until_dt - now_utc).total_seconds() / 60)
+                lines.append(f"Snooze activo: {mins} minutos restantes")
+        except Exception:
+            pass
+
+    return "\n".join(lines)

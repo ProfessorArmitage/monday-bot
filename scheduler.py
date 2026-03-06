@@ -131,8 +131,14 @@ async def heartbeat(single_user: int = None):
     users = [single_user] if single_user else await get_all_google_users()
     for user_id in users:
         try:
-            alerts = []
             user_data = memory.get_user(user_id)
+
+            # ── DND check ──────────────────────────────────────────
+            dnd_on, _ = tz_utils.is_dnd_active(user_data)
+            if dnd_on:
+                continue
+
+            alerts = []
 
             # ── 1. Reuniones próximas (siempre activo) ────────────
             events = await google_services.get_upcoming_events(user_id, max_results=10, days=1)
@@ -191,6 +197,11 @@ async def morning_briefing():
             current_hour = user_now.hour
             today = user_now.strftime("%A %d de %B")
 
+            # ── DND check ──────────────────────────────────────────
+            dnd_on, _ = tz_utils.is_dnd_active(user)
+            if dnd_on:
+                continue
+
             ritmo = user.get("ritmo", {})
             preferred = ritmo.get("briefing_hora", "07:00")
             try:
@@ -245,6 +256,11 @@ async def weekly_summary():
 
     for user_id in users:
         try:
+            user_data_ws = memory.get_user(user_id)
+            dnd_on, _ = tz_utils.is_dnd_active(user_data_ws)
+            if dnd_on:
+                continue
+
             # Eventos de los próximos 7 días
             events = await google_services.get_upcoming_events(user_id, max_results=20, days=7)
 
@@ -279,6 +295,10 @@ async def friday_wrap():
     users = await get_all_users()
     for user_id in users:
         try:
+            user_data_fw = memory.get_user(user_id)
+            dnd_on, _ = tz_utils.is_dnd_active(user_data_fw)
+            if dnd_on:
+                continue
             facts = memory.get_facts(user_id)
             facts_text = "\n".join(f"- {f}" for f in facts[:5]) if facts else "Aún estoy conociéndote."
 
