@@ -67,8 +67,8 @@ def _init_db():
                     -- Metadata
                     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
                     last_seen         TIMESTAMP NOT NULL DEFAULT NOW(),
-                    -- Dominio activo del usuario
-                    domain_pending    JSONB NOT NULL DEFAULT '{}'  -- {"suggested": "legal", "asked_at": "..."},
+                    -- Dominio activo del usuario (estado de sugerencia pendiente)
+                    domain_pending    JSONB NOT NULL DEFAULT '{}',
                     -- Reprovisión
                     bot_version       TEXT NOT NULL DEFAULT '0.0.0',
                     last_reprovisioned TIMESTAMP DEFAULT NULL,
