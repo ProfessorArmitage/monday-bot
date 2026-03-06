@@ -76,13 +76,17 @@ async def bootstrap_existing_user(user_id: int):
         return
 
     # Asegurar que la carpeta Monday existe
-    await get_or_create_monday_folder(user_id)
+    folder_id = await get_or_create_monday_folder(user_id)
 
     prefs = memory.get_category(user_id, "preferencias")
     doc_id = prefs.get(WORKSPACE_DOC_ID_KEY)
 
-    # Si ya tiene doc_id guardado y el doc existe → no hacer nada
+    # Si ya tiene doc_id guardado y el doc existe → moverlo a carpeta Monday si no está ahí
     if doc_id and await _doc_exists(user_id, doc_id):
+        if folder_id:
+            moved = await google_services.move_file_to_folder(user_id, doc_id, folder_id)
+            if moved:
+                logger.info(f"Doc de memoria {doc_id} movido a carpeta Monday para usuario {user_id}")
         return
 
     # Crear o encontrar el doc y volcar toda la memoria de postgres

@@ -948,6 +948,14 @@ async def reprovision_user(user_id: int, memory_module, bot=None) -> bool:
             if domain_id and not memory_module.get_domain_seed(user_id):
                 await _inject_domain_seed(user_id, domain_id, memory_module)
 
+            # Mover doc de memoria a carpeta Monday si tiene Google conectado
+            if memory_module.has_google_connected(user_id):
+                try:
+                    import workspace_memory as _wm
+                    await _wm.bootstrap_existing_user(user_id)
+                except Exception as _e:
+                    logger.warning(f"No se pudo mover doc de {user_id} a carpeta Monday: {_e}")
+
         except Exception as e:
             logger.warning(f"No se pudo notificar al usuario {user_id}: {e}")
 
