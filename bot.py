@@ -1395,10 +1395,8 @@ async def handle_voice_message(update, context):
 
     logger.info(f"Audio transcrito de {user_name} ({user_id}): {transcribed[:80]}")
 
-    # Inyectar texto transcrito en el update para reusar handle_message
-    # Sobrescribimos el texto del mensaje con la transcripción
-    update.message.text = transcribed
-    await handle_message(update, context)
+    # Pasar transcripción al flujo de procesamiento
+    await _process_user_text(update, context, transcribed)
 
 
 async def _send_voice_reply(update, user_id: int, text: str):
