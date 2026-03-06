@@ -71,6 +71,8 @@ def _init_db():
                     domain_pending    JSONB NOT NULL DEFAULT '{}',
                     -- Seed de memoria pre-sembrada por dominio
                     domain_seed       JSONB NOT NULL DEFAULT '{}',
+                    -- Carpeta de Drive de Monday
+                    monday_folder_id  TEXT DEFAULT NULL,
                     -- Reprovisión
                     bot_version       TEXT NOT NULL DEFAULT '0.0.0',
                     last_reprovisioned TIMESTAMP DEFAULT NULL,
@@ -103,6 +105,7 @@ def _init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_identity JSONB NOT NULL DEFAULT '{}'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS domain_pending JSONB NOT NULL DEFAULT '{}'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS domain_seed JSONB NOT NULL DEFAULT '{}'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS monday_folder_id TEXT DEFAULT NULL",
             ]
             for sql in migrations:
                 try:
@@ -486,6 +489,24 @@ def set_domain_seed(user_id: int, seed: dict):
             cur.execute(
                 "UPDATE users SET domain_seed = %s WHERE user_id = %s",
                 (json.dumps(seed), user_id)
+            )
+
+
+def get_monday_folder_id(user_id: int) -> str | None:
+    """Devuelve el folder_id de la carpeta Monday en Drive o None."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT monday_folder_id FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+
+def set_monday_folder_id(user_id: int, folder_id: str):
+    """Guarda el folder_id de la carpeta Monday en Drive."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET monday_folder_id = %s WHERE user_id = %s",
+                (folder_id, user_id)
             )
 
 

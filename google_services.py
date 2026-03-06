@@ -9,6 +9,7 @@ Servicios disponibles:
   - Google Sheets    → leer y escribir celdas
 """
 
+import json
 import httpx
 from datetime import datetime, timezone, timedelta
 import tz_utils
@@ -402,6 +403,160 @@ async def append_to_sheet(user_id: int, spreadsheet_id: str = "", values: list =
         )
         r.raise_for_status()
         return r.json()
+
+
+
+# ── GOOGLE DRIVE — CARPETA MONDAY ────────────────────────────
+
+async def create_folder(user_id: int, name: str, parent_id: str = None) -> str | None:
+    """Crea una carpeta en Google Drive. Devuelve el folder_id o None."""
+    token = await get_valid_token(user_id)
+    metadata = {
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    if parent_id:
+        metadata["parents"] = [parent_id]
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://www.googleapis.com/drive/v3/files",
+            headers={"Authorization": f"Bearer {token}"},
+            json=metadata,
+            params={"fields": "id,name"},
+        )
+    if r.status_code == 200:
+        return r.json().get("id")
+    return None
+
+
+async def find_folder(user_id: int, name: str) -> str | None:
+    """Busca una carpeta por nombre exacto. Devuelve folder_id o None."""
+    token = await get_valid_token(user_id)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            "https://www.googleapis.com/drive/v3/files",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "q": (
+                    f"name = '{name}' and "
+                    "mimeType = 'application/vnd.google-apps.folder' and "
+                    "trashed = false"
+                ),
+                "fields": "files(id,name)",
+                "pageSize": 1,
+            },
+        )
+    files = r.json().get("files", []) if r.status_code == 200 else []
+    return files[0]["id"] if files else None
+
+
+async def move_file_to_folder(user_id: int, file_id: str, folder_id: str) -> bool:
+    """Mueve un archivo a una carpeta. Devuelve True si tuvo éxito."""
+    token = await get_valid_token(user_id)
+    # Obtener parents actuales
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"fields": "parents"},
+        )
+        if r.status_code != 200:
+            return False
+        current_parents = ",".join(r.json().get("parents", []))
+
+        r2 = await client.patch(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "addParents": folder_id,
+                "removeParents": current_parents,
+                "fields": "id,parents",
+            },
+        )
+    return r2.status_code == 200
+
+
+async def list_folder_files(user_id: int, folder_id: str,
+                             name_contains: str = None) -> list:
+    """Lista archivos dentro de una carpeta. Filtra por nombre si se da."""
+    token = await get_valid_token(user_id)
+    q = f"'{folder_id}' in parents and trashed = false"
+    if name_contains:
+        q += f" and name contains '{name_contains}'"
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            "https://www.googleapis.com/drive/v3/files",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "q": q,
+                "fields": "files(id,name,createdTime,modifiedTime,size)",
+                "orderBy": "createdTime desc",
+                "pageSize": 20,
+            },
+        )
+    return r.json().get("files", []) if r.status_code == 200 else []
+
+
+async def delete_drive_file(user_id: int, file_id: str) -> bool:
+    """Elimina un archivo de Drive permanentemente. Devuelve True si tuvo éxito."""
+    token = await get_valid_token(user_id)
+    async with httpx.AsyncClient() as client:
+        r = await client.delete(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    return r.status_code == 204
+
+
+async def upload_json_to_drive(user_id: int, filename: str,
+                                content: str, folder_id: str = None) -> str | None:
+    """
+    Sube un archivo JSON a Drive. Devuelve el file_id o None.
+    Usa multipart/form-data para subir metadata + contenido en una sola llamada.
+    """
+    token = await get_valid_token(user_id)
+    metadata = {"name": filename, "mimeType": "application/json"}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+
+    import io
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://www.googleapis.com/upload/drive/v3/files",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"uploadType": "multipart", "fields": "id,name"},
+            files={
+                "metadata": (
+                    None,
+                    json.dumps(metadata),
+                    "application/json; charset=UTF-8",
+                ),
+                "file": (
+                    filename,
+                    content.encode("utf-8"),
+                    "application/json",
+                ),
+            },
+        )
+    if r.status_code in (200, 201):
+        return r.json().get("id")
+    return None
+
+
+async def download_drive_file(user_id: int, file_id: str) -> str | None:
+    """Descarga el contenido de un archivo de Drive como texto. Devuelve str o None."""
+    token = await get_valid_token(user_id)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"alt": "media"},
+        )
+    if r.status_code == 200:
+        return r.text
+    return None
 
 
 async def delete_event(user_id: int, event_id: str = "", **kwargs) -> dict:

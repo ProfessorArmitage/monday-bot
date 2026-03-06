@@ -38,6 +38,7 @@ import workspace_memory
 import conversation_context
 import provisioning
 import domain_seeds
+import memory_backup
 import identity as identity_module
 import skills as skills_engine
 from scheduler import start_scheduler, init_scheduler
@@ -291,6 +292,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     domain_pending = memory.get_domain_pending(user_id)
     if domain_pending.get("asked_at"):
         handled = await _handle_domain_selection(user_id, update.message.text, update)
+        if handled:
+            return
+
+    # ── Interceptar confirmación de import de memoria ────────
+    import_pending = memory.get_category(user_id, "preferencias") or {}
+    if import_pending.get("_import_pending"):
+        handled = await _handle_import_confirmation(user_id, update.message.text, update)
         if handled:
             return
 
@@ -1194,6 +1202,147 @@ async def cmd_mi_dominio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+# ── EXPORT / IMPORT DE MEMORIA ────────────────────────────────
+
+async def _handle_import_confirmation(user_id: int, text: str, update) -> bool:
+    """
+    Maneja la confirmación del usuario antes de importar memoria.
+    Devuelve True si el mensaje fue consumido por este handler.
+    """
+    prefs = memory.get_category(user_id, "preferencias") or {}
+    if not prefs.get("_import_pending"):
+        return False
+
+    text_lower = text.strip().lower()
+
+    if text_lower in ["si", "sí", "yes", "confirmar", "ok"]:
+        snapshot_json = prefs.get("_import_snapshot")
+        if not snapshot_json:
+            await update.message.reply_text("No encontré el respaldo. Intenta /importar_memoria de nuevo.")
+            _clear_import_pending(user_id)
+            return True
+
+        snapshot = json.loads(snapshot_json)
+        ok = memory_backup.restore_from_snapshot(user_id, snapshot)
+        _clear_import_pending(user_id)
+
+        if ok:
+            exported_at = snapshot.get("exported_at", "")[:10]
+            await update.message.reply_text(
+                f"Memoria restaurada desde el respaldo del {exported_at}.\n"
+                f"Tu contexto, skills y configuración han sido recuperados."
+            )
+        else:
+            await update.message.reply_text(
+                "Hubo un error al restaurar la memoria. "
+                "Tu memoria actual no fue modificada. Intenta de nuevo."
+            )
+        return True
+
+    elif text_lower in ["no", "cancelar", "cancel"]:
+        _clear_import_pending(user_id)
+        await update.message.reply_text(
+            "Importación cancelada. Tu memoria actual no fue modificada."
+        )
+        return True
+
+    return False  # no consumir — puede ser otro mensaje
+
+
+def _clear_import_pending(user_id: int):
+    """Limpia el estado de confirmación de import."""
+    prefs = memory.get_category(user_id, "preferencias") or {}
+    prefs.pop("_import_pending", None)
+    prefs.pop("_import_snapshot", None)
+    memory.set_category(user_id, "preferencias", prefs)
+
+
+async def cmd_exportar_memoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Genera un respaldo JSON de toda la memoria del usuario
+    y lo guarda en la carpeta Monday de su Google Drive.
+    """
+    user_id = update.effective_user.id
+
+    if not memory.has_google_connected(user_id):
+        await update.message.reply_text(
+            "Necesitas conectar tu Google Drive primero.\nUsa /conectar_google para hacerlo."
+        )
+        return
+
+    await update.message.chat.send_action("typing")
+    result = await memory_backup.export_to_drive(user_id)
+
+    if result["ok"]:
+        nombre_archivo = result["filename"]
+        max_b = memory_backup.MAX_BACKUPS
+        await update.message.reply_text(
+            f"Respaldo guardado en tu Drive.\n"
+            f"Archivo: {nombre_archivo}\n"
+            f"Carpeta: Monday — Asistente Personal\n\n"
+            f"Se conservan los ultimos {max_b} respaldos automaticamente."
+        )
+    else:
+        error = result.get("error", "desconocido")
+        if error == "no_folder":
+            await update.message.reply_text(
+                "No pude acceder a tu carpeta de Drive. "
+                "Intenta reconectar Google con /conectar_google."
+            )
+        else:
+            await update.message.reply_text(
+                "Hubo un error al generar el respaldo. Intenta de nuevo en unos minutos."
+            )
+
+
+async def cmd_importar_memoria(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Restaura la memoria desde el respaldo más reciente en Drive.
+    Pide confirmación antes de reemplazar la memoria actual.
+    """
+    user_id = update.effective_user.id
+
+    if not memory.has_google_connected(user_id):
+        await update.message.reply_text(
+            "Necesitas conectar tu Google Drive primero.\nUsa /conectar_google para hacerlo."
+        )
+        return
+
+    await update.message.chat.send_action("typing")
+
+    # Listar respaldos disponibles
+    backups = await memory_backup.list_backups(user_id)
+    if not backups:
+        await update.message.reply_text(
+            "No encontré respaldos en tu Drive.\n"
+            "Genera uno primero con /exportar_memoria."
+        )
+        return
+
+    # Descargar el más reciente
+    snapshot = await memory_backup.get_latest_backup_content(user_id)
+    if not snapshot:
+        await update.message.reply_text(
+            "No pude leer el respaldo más reciente. "
+            "Puede estar dañado. Intenta exportar uno nuevo con /exportar_memoria."
+        )
+        return
+
+    # Mostrar lista y advertencia de confirmación
+    backup_list = memory_backup.format_backup_list(backups)
+    warning = memory_backup.build_confirmation_warning(user_id, snapshot)
+
+    await update.message.reply_text(backup_list)
+    await update.message.reply_text(warning)
+
+    # Guardar snapshot en preferencias temporalmente para el handler de confirmación
+    prefs = memory.get_category(user_id, "preferencias") or {}
+    prefs["_import_pending"] = True
+    prefs["_import_snapshot"] = json.dumps(snapshot, ensure_ascii=False)
+    memory.set_category(user_id, "preferencias", prefs)
+
+
 # ── ADMIN ─────────────────────────────────────────────────────
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1382,6 +1531,47 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    # ── /admin memoria ... ──
+    if subcommand == "memoria":
+        if len(args) < 3:
+            await update.message.reply_text(
+                "Uso: /admin memoria exportar <user_id>\n"
+                "     /admin memoria ver_backups <user_id>"
+            )
+            return
+
+        action = args[1].lower()
+
+        if action == "exportar" and len(args) >= 3:
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            await update.message.chat.send_action("typing")
+            result = await memory_backup.export_to_drive(target_id)
+            if result["ok"]:
+                await update.message.reply_text(
+                    f"Backup generado para usuario {target_id}:\n"
+                    f"Archivo: {result['filename']}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"Error al generar backup: {result.get('error')}"
+                )
+            return
+
+        if action == "ver_backups" and len(args) >= 3:
+            try:
+                target_id = int(args[2])
+            except ValueError:
+                await update.message.reply_text("user_id debe ser un número.")
+                return
+            backups = await memory_backup.list_backups(target_id)
+            msg = memory_backup.format_backup_list(backups)
+            await update.message.reply_text(f"Backups de usuario {target_id}:\n\n{msg}")
+            return
+
     await update.message.reply_text(f"Subcomando '{subcommand}' no reconocido.")
 
 
@@ -1428,6 +1618,8 @@ async def main():
     telegram_app.add_handler(CommandHandler("version", cmd_version))
     telegram_app.add_handler(CommandHandler("mi_dominio", cmd_mi_dominio))
     telegram_app.add_handler(CommandHandler("admin", cmd_admin))
+    telegram_app.add_handler(CommandHandler("exportar_memoria", cmd_exportar_memoria))
+    telegram_app.add_handler(CommandHandler("importar_memoria", cmd_importar_memoria))
     telegram_app.add_handler(CommandHandler("mi_zona", cmd_mi_zona))
     telegram_app.add_handler(CommandHandler("mi_asistente", cmd_mi_asistente))
     telegram_app.add_handler(CommandHandler("evolucion", cmd_evolucion))

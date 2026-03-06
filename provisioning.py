@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.4.0"
+MANIFEST_VERSION = "1.5.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -94,6 +94,15 @@ CHANGELOG = {
             "Vocabulario, flujos y preferencias de tu área se cargan automáticamente",
             "El seed evoluciona cuando aprendes hechos relevantes a tu dominio",
             "Los admins pueden configurar datos específicos (logo, handles, cédula, etc.)",
+        ],
+    },
+    "1.5.0": {
+        "titulo": "Carpeta Monday en Drive + Export/Import de memoria",
+        "cambios": [
+            "Nueva carpeta 'Monday — Asistente Personal' en tu Google Drive",
+            "Comando /exportar_memoria — genera respaldo JSON en tu Drive",
+            "Comando /importar_memoria — restaura tu memoria desde un respaldo",
+            "Respaldo automatico cada domingo con retencion de 4 semanas",
         ],
     },
     # Ejemplo de cómo agregar la próxima versión:

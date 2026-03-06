@@ -23,18 +23,47 @@ import logging
 import json
 import httpx
 from datetime import datetime
+import tz_utils
 
 import memory
 from google_auth import get_valid_token
+import google_services
 
 logger = logging.getLogger(__name__)
 
 DOC_TITLE_PREFIX = "Memoria — "
+MONDAY_FOLDER_NAME = "Monday — Asistente Personal"
 WORKSPACE_DOC_ID_KEY = "workspace_doc_id"
 
 
 # ── Obtener o crear el documento de memoria ───────────────────
 
+
+
+
+async def get_or_create_monday_folder(user_id: int) -> str | None:
+    """
+    Obtiene o crea la carpeta 'Monday — Asistente Personal' en Drive.
+    Guarda el folder_id en DB para no buscarlo en cada operación.
+    Devuelve el folder_id o None si falla.
+    """
+    # Revisar si ya está guardado en DB
+    folder_id = memory.get_monday_folder_id(user_id)
+    if folder_id:
+        return folder_id
+
+    # Buscar si ya existe en Drive (por si se creó antes)
+    folder_id = await google_services.find_folder(user_id, MONDAY_FOLDER_NAME)
+
+    # Si no existe, crear
+    if not folder_id:
+        folder_id = await google_services.create_folder(user_id, MONDAY_FOLDER_NAME)
+
+    if folder_id:
+        memory.set_monday_folder_id(user_id, folder_id)
+        logger.info(f"Carpeta Monday lista para usuario {user_id}: {folder_id}")
+
+    return folder_id
 
 
 async def bootstrap_existing_user(user_id: int):
@@ -45,6 +74,9 @@ async def bootstrap_existing_user(user_id: int):
     """
     if not memory.has_google_connected(user_id):
         return
+
+    # Asegurar que la carpeta Monday existe
+    await get_or_create_monday_folder(user_id)
 
     prefs = memory.get_category(user_id, "preferencias")
     doc_id = prefs.get(WORKSPACE_DOC_ID_KEY)
@@ -133,10 +165,13 @@ async def _find_doc_in_drive(user_id: int, title: str) -> str | None:
 
 
 async def _create_memory_doc(user_id: int, title: str, nombre: str) -> str | None:
-    """Crea el documento de memoria con estructura inicial."""
+    """Crea el documento de memoria con estructura inicial.
+    Lo coloca dentro de la carpeta Monday si existe.
+    """
     try:
+        folder_id = memory.get_monday_folder_id(user_id)
         token = await get_valid_token(user_id)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now(tz_utils.ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M UTC")
 
         initial_content = (
             f"MEMORIA DE {nombre.upper()}\n"
@@ -225,7 +260,7 @@ async def sync_memory_to_doc(user_id: int):
     try:
         user = memory.get_user(user_id)
         nombre = user.get("identidad", {}).get("nombre", "Usuario")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now(tz_utils.ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M UTC")
 
         # Construir contenido del documento
         lines = [

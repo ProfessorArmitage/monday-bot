@@ -18,6 +18,7 @@ import memory
 import google_services
 import workspace_memory
 import provisioning
+import memory_backup
 import google_auth
 
 logger = logging.getLogger(__name__)
@@ -310,6 +311,33 @@ async def nightly_doc_sync():
             logger.error(f"Error en sync nocturno para {user_id}: {e}")
 
 
+
+async def weekly_backup():
+    """
+    Corre cada domingo a las 4am UTC.
+    Genera respaldo automático de memoria para todos los usuarios con Google conectado.
+    Aplica retención de MAX_BACKUPS respaldos por usuario.
+    """
+    users = await get_all_google_users()
+    logger.info(f"Iniciando backup semanal para {len(users)} usuarios...")
+
+    ok = 0
+    errors = 0
+    for user_id in users:
+        try:
+            result = await memory_backup.export_to_drive(user_id)
+            if result["ok"]:
+                ok += 1
+            else:
+                # Sin Google conectado o sin carpeta — no es error crítico
+                logger.debug(f"Backup omitido para {user_id}: {result.get('error')}")
+        except Exception as e:
+            errors += 1
+            logger.warning(f"Error en backup de usuario {user_id}: {e}")
+
+    logger.info(f"Backup semanal completo — ok: {ok}, errores: {errors}")
+
+
 async def weekly_reprovisioning():
     """
     Corre cada domingo a las 3am.
@@ -379,6 +407,13 @@ def start_scheduler() -> AsyncIOScheduler:
         weekly_reprovisioning,
         CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="America/Mexico_City"),
         id="weekly_reprovisioning"
+    )
+
+    # Backup semanal de memoria — domingos 4am UTC (1 hora después de reprovisión)
+    scheduler.add_job(
+        weekly_backup,
+        CronTrigger(day_of_week="sun", hour=4, minute=0, timezone="UTC"),
+        id="weekly_backup"
     )
 
     scheduler.start()
