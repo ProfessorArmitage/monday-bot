@@ -99,6 +99,7 @@ def _init_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reprovisioned TIMESTAMP DEFAULT NULL",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_overrides JSONB NOT NULL DEFAULT '{}'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_identity JSONB NOT NULL DEFAULT '{}'",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS domain_pending JSONB NOT NULL DEFAULT '{}'",
             ]
             for sql in migrations:
                 try:
