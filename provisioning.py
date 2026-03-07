@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── VERSIÓN ACTUAL DEL SISTEMA ────────────────────────────────
 # Incrementa esto con cada cambio que quieras propagar a usuarios existentes
-MANIFEST_VERSION = "1.7.0"
+MANIFEST_VERSION = "1.8.0"
 
 # ── CHANGELOG ─────────────────────────────────────────────────
 # Describe qué cambió en cada versión. Se envía al usuario al reprovisionarse.
@@ -122,15 +122,15 @@ CHANGELOG = {
             "Por default las respuestas siguen siendo en texto",
         ],
     },
-    # Ejemplo de cómo agregar la próxima versión:
-    # "1.1.0": {
-    #     "titulo": "Identidad del asistente + nuevas skills",
-    #     "cambios": [
-    #         "El asistente ahora tiene nombre y personalidad configurable",
-    #         "3 nuevas skills: resumen ejecutivo, análisis de correos, planificación semanal",
-    #     ],
-    #     "accion_requerida": "Usa /nombre_asistente para personalizar cómo me llamo",
-    # },
+    "1.8.0": {
+        "titulo": "Arquitectura multi-canal",
+        "cambios": [
+            "Refactoring interno para soportar múltiples canales de comunicación",
+            "La lógica del bot ahora es completamente agnóstica al canal de origen",
+            "Preparación para WhatsApp, Slack y Email (pendiente de activar)",
+            "No hay cambios en comportamiento ni comandos para el usuario",
+        ],
+    },
 }
 
 # ── SYSTEM PROMPT VERSIONADO ──────────────────────────────────

@@ -112,10 +112,126 @@ def _init_db():
                     cur.execute(sql)
                 except Exception:
                     pass
+
+            # ── Tabla de identidades cross-canal ───────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS channel_identities (
+                    id           SERIAL PRIMARY KEY,
+                    monday_id    BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    channel      TEXT   NOT NULL,
+                    channel_id   TEXT   NOT NULL,
+                    display_name TEXT   DEFAULT NULL,
+                    verified_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UNIQUE(channel, channel_id)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_channel_identities_lookup
+                ON channel_identities(channel, channel_id)
+            """)
+            # Asegurar que todos los usuarios Telegram existentes
+            # tienen su registro en channel_identities
+            cur.execute("""
+                INSERT INTO channel_identities (monday_id, channel, channel_id)
+                SELECT user_id, 'telegram', user_id::TEXT
+                FROM users
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM channel_identities
+                    WHERE monday_id = users.user_id
+                    AND   channel   = 'telegram'
+                )
+            """)
+
         conn.commit()
 
 
 _init_db()
+
+
+# ── Identidad cross-canal ─────────────────────────────────────
+
+def resolve_channel_id(channel: str, channel_id: str) -> int | None:
+    """
+    Resuelve un (channel, channel_id) al monday_id interno.
+    Retorna None si no existe el vínculo.
+
+    Uso en adapters:
+        monday_id = memory.resolve_channel_id("whatsapp", "+521234567890")
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT monday_id FROM channel_identities WHERE channel=%s AND channel_id=%s",
+                (channel, str(channel_id))
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def link_channel(monday_id: int, channel: str, channel_id: str,
+                 display_name: str = None) -> bool:
+    """
+    Vincula un (channel, channel_id) a un monday_id existente.
+    Retorna True si el vínculo fue creado, False si ya existía.
+
+    Uso al vincular un canal nuevo:
+        ok = memory.link_channel(user_id, "whatsapp", "+521234567890", "Juan")
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO channel_identities (monday_id, channel, channel_id, display_name)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (channel, channel_id) DO NOTHING
+                RETURNING id
+            """, (monday_id, channel, str(channel_id), display_name))
+            created = cur.fetchone() is not None
+        conn.commit()
+    return created
+
+
+def unlink_channel(monday_id: int, channel: str) -> bool:
+    """
+    Desvincula un canal de un usuario.
+    No se puede desvincular el canal 'telegram' (canal principal).
+    Retorna True si se eliminó el vínculo.
+    """
+    if channel == "telegram":
+        return False
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM channel_identities WHERE monday_id=%s AND channel=%s",
+                (monday_id, channel)
+            )
+            deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
+
+
+def get_linked_channels(monday_id: int) -> list[dict]:
+    """
+    Retorna todos los canales vinculados a un monday_id.
+
+    Ejemplo de retorno:
+        [
+            {"channel": "telegram", "channel_id": "123456", "display_name": None},
+            {"channel": "whatsapp", "channel_id": "+521234", "display_name": "Juan"},
+        ]
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT channel, channel_id, display_name, verified_at "
+                "FROM channel_identities WHERE monday_id=%s ORDER BY verified_at",
+                (monday_id,)
+            )
+            rows = cur.fetchall()
+    return [
+        {"channel": r[0], "channel_id": r[1],
+         "display_name": r[2], "verified_at": r[3].isoformat() if r[3] else None}
+        for r in rows
+    ]
 
 
 # ── Operaciones básicas de usuario ───────────────────────────
