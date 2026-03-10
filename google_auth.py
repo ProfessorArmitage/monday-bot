@@ -15,6 +15,7 @@ import os
 import json
 import httpx
 from datetime import datetime, timedelta
+import security
 
 # ── Credenciales de Google (desde .env / Railway Variables) ──
 GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
@@ -34,8 +35,8 @@ SCOPES = " ".join([
 def get_auth_url(telegram_user_id: int) -> str:
     """
     Genera el URL de autorización de Google.
-    Incluye el telegram_user_id en el 'state' para saber
-    a qué usuario pertenece el callback.
+    Usa un token anti-CSRF (security.generate_oauth_state) en lugar de
+    exponer el user_id directamente. El token expira en 10 minutos.
     """
     from urllib.parse import urlencode
 
@@ -46,7 +47,7 @@ def get_auth_url(telegram_user_id: int) -> str:
         "scope":         SCOPES,
         "access_type":   "offline",
         "prompt":        "consent",
-        "state":         str(telegram_user_id),
+        "state":         security.generate_oauth_state(telegram_user_id),  # token anti-CSRF con TTL
     }
     # urlencode escapa correctamente todos los caracteres especiales
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"

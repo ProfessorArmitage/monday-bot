@@ -34,6 +34,7 @@ import domain_seeds
 import memory_backup
 import skills as skills_engine
 from channel_types import InboundMessage, ChannelType, get_channel_style
+import security
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +388,30 @@ async def process_message(
     from datetime import datetime
 
     user_id = msg.monday_id
+
+    # ── Rate limiting ─────────────────────────────────────────
+    allowed, reason = security.check_rate_limit(user_id, is_voice=msg.is_voice)
+    if not allowed:
+        await send_fn(reason)
+        return
+
+    # ── Sanitizar y limitar longitud ──────────────────────────
+    clean_text, was_truncated = security.sanitize_text(msg.text)
+    if not clean_text:
+        return
+    if was_truncated:
+        await send_fn(
+            f"ℹ️ Tu mensaje era muy largo y fue recortado a {security.MAX_MESSAGE_LENGTH} caracteres."
+        )
+    msg = InboundMessage(
+        monday_id=msg.monday_id,
+        channel=msg.channel,
+        text=clean_text,
+        is_voice=msg.is_voice,
+        subject=msg.subject,
+        thread_id=msg.thread_id,
+        raw=msg.raw,
+    )
 
     # ── Pending states (interceptan antes de ir a Groq) ──────
     if await handle_pending_domain(user_id, msg.text, send_fn):

@@ -18,6 +18,7 @@ import json
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
+import security
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -36,7 +37,8 @@ MEMORY_CATEGORIES = [
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL)
+    # sslmode=require fuerza TLS en tránsito. Railway PostgreSQL soporta SSL.
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
 
 def _init_db():
@@ -280,10 +282,13 @@ def set_category(user_id: int, category: str, data: dict | list):
     """Reemplaza completamente el contenido de una categoría."""
     if category not in MEMORY_CATEGORIES:
         raise ValueError(f"Categoría inválida: {category}")
+    col = security.safe_column_name(category)  # whitelist explícita, sin f-string
+    if not col:
+        raise ValueError(f"Categoría inválida: {category}")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE users SET {category} = %s WHERE user_id = %s",
+                f"UPDATE users SET {col} = %s WHERE user_id = %s",  # col validado por whitelist
                 (json.dumps(data), user_id)
             )
             conn.commit()
@@ -470,16 +475,31 @@ def build_system_prompt(user_id: int, base_prompt: str) -> str:
 # ── Google OAuth ──────────────────────────────────────────────
 
 def save_google_tokens(user_id: int, tokens):
+    # Cifrar tokens antes de persistir en PostgreSQL.
+    # JSONB requiere JSON válido — Fernet produce texto base64 que no es JSON,
+    # por eso se envuelve en un sobre: {"e": "<fernet_token>"}.
+    # Si ENCRYPTION_KEY no está configurada, security.encrypt() es no-op y
+    # se guarda el JSON original (comportamiento anterior).
+    raw = json.dumps(tokens) if tokens else None
+    if raw:
+        encrypted_value = security.encrypt(raw)
+        # Si el valor fue cifrado (no es el mismo json original), envolverlo
+        if encrypted_value != raw:
+            to_store = json.dumps({"e": encrypted_value})  # sobre JSON válido para JSONB
+        else:
+            to_store = raw  # sin ENCRYPTION_KEY — guardar plano como antes
+    else:
+        to_store = None
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE users SET google_tokens = %s WHERE user_id = %s",
-                (json.dumps(tokens) if tokens else None, user_id)
+                (to_store, user_id)
             )
             if cur.rowcount == 0:
                 cur.execute(
                     "INSERT INTO users (user_id, google_tokens) VALUES (%s, %s)",
-                    (user_id, json.dumps(tokens) if tokens else None)
+                    (user_id, to_store)
                 )
             conn.commit()
 
@@ -489,7 +509,31 @@ def get_google_tokens(user_id: int) -> dict | None:
         with conn.cursor() as cur:
             cur.execute("SELECT google_tokens FROM users WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
-            return row[0] if row and row[0] else None
+            if not row or not row[0]:
+                return None
+            raw = row[0]
+            # psycopg2 deserializa JSONB automáticamente → raw es un dict de Python.
+            # Casos posibles:
+            #   A) {"e": "<fernet_token>"}  → dato nuevo cifrado
+            #   B) {"access_token": ...}    → dato legacy sin cifrar
+            if isinstance(raw, dict):
+                if "e" in raw and len(raw) == 1:
+                    # Caso A: sobre cifrado — descifrar y deserializar
+                    try:
+                        return json.loads(security.decrypt(raw["e"]))
+                    except Exception:
+                        return None
+                else:
+                    # Caso B: legacy plain dict — retornar tal cual
+                    return raw
+            # Fallback: si por alguna razón llegó como string
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and "e" in parsed and len(parsed) == 1:
+                    return json.loads(security.decrypt(parsed["e"]))
+                return parsed
+            except Exception:
+                return None
 
 
 def has_google_connected(user_id: int) -> bool:

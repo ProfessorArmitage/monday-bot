@@ -46,6 +46,7 @@ import skills as skills_engine
 import tz_utils
 import domain_seeds
 import channel_router
+import security
 from channel_types import InboundMessage, ChannelType
 
 logger = logging.getLogger(__name__)
@@ -227,10 +228,22 @@ async def oauth_callback(request: web.Request) -> web.Response:
     error    = request.rel_url.query.get("error")
 
     if error or not code or not state:
-        return web.Response(text="Error en la autorización. Cierra esta ventana y vuelve a intentarlo.", content_type="text/html")
+        return web.Response(
+            text="<h2>❌ Error en la autorización.</h2><p>Cierra esta ventana y vuelve a intentarlo.</p>",
+            content_type="text/html",
+            headers={"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff"}
+        )
 
     try:
-        user_id = int(state)
+        # Validar token anti-CSRF — one-time use, expira en 10 min
+        user_id = security.validate_oauth_state(state)
+        if user_id is None:
+            return web.Response(
+                text="<h2>❌ Link de autorización inválido o expirado.</h2>"
+                     "<p>Regresa a Telegram y usa /conectar_google para generar un nuevo link.</p>",
+                content_type="text/html",
+                headers={"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff"}
+            )
 
         # Intercambiar código por tokens usando httpx (sin SDK)
         tokens = await google_auth.exchange_code_for_tokens(code)
@@ -256,7 +269,9 @@ async def oauth_callback(request: web.Request) -> web.Response:
 
         return web.Response(
             text="<h2>✅ ¡Conexión exitosa!</h2><p>Puedes cerrar esta ventana y volver a Telegram.</p>",
-            content_type="text/html"
+            content_type="text/html",
+            headers={"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
+                     "Content-Security-Policy": "default-src 'none'"}
         )
 
     except Exception as e:
@@ -921,6 +936,12 @@ async def handle_voice_message(update, context):
         )
         return
 
+    # Validar tamaño del audio antes de transcribir
+    size_ok, size_err = security.validate_voice_size(len(audio_bytes))
+    if not size_ok:
+        await update.message.reply_text(size_err)
+        return
+
     # Transcribir
     transcribed = await audio_handler.transcribe(audio_bytes, filename="audio.ogg")
 
@@ -1227,6 +1248,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if user_id not in ADMIN_USER_IDS:
+        security.audit_log(user_id, "cmd_admin_denied", details="Intento de acceso no autorizado")
         await update.message.reply_text("No tienes permisos para usar este comando.")
         return
 
@@ -1429,6 +1451,48 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Subcomando '{subcommand}' no reconocido.")
 
 
+async def cmd_rate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """[Admin] Muestra estado del rate limiter de un usuario. Uso: /rate_status <user_id>"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("Uso: /rate_status <user_id>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("user_id debe ser un número.")
+        return
+    status = security.get_rate_status(target_id)
+    security.audit_log(user_id, "rate_status_check", target_user_id=target_id)
+    await update.message.reply_text(
+        f"📊 Rate limit — usuario {target_id}\n"
+        f"  Mensajes en ventana: {status['msgs_in_window']}/{status['limit']}\n"
+        f"  Ventana: {status['window_seconds']}s\n"
+        f"  Bloqueado: {'Sí, ' + str(status['unblocks_in']) + 's restantes' if status['blocked'] else 'No'}"
+    )
+
+
+async def cmd_rate_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """[Admin] Reinicia el rate limiter de un usuario. Uso: /rate_reset <user_id>"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("Uso: /rate_reset <user_id>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("user_id debe ser un número.")
+        return
+    security.reset_rate_limit(target_id)
+    security.audit_log(user_id, "rate_limit_reset", target_user_id=target_id)
+    await update.message.reply_text(f"✅ Rate limit reiniciado para usuario {target_id}.")
+
+
+
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la versión actual del bot y cuándo se actualizó."""
     user_id = update.effective_user.id
@@ -1483,5 +1547,7 @@ def register_handlers(app) -> None:
     app.add_handler(CommandHandler("nueva_skill",        cmd_nueva_skill))
     app.add_handler(CommandHandler("mis_skills",         cmd_mis_skills))
     app.add_handler(CommandHandler("voz",                cmd_voz))
+    app.add_handler(CommandHandler("rate_status",         cmd_rate_status))
+    app.add_handler(CommandHandler("rate_reset",          cmd_rate_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))

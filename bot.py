@@ -36,6 +36,7 @@ from telegram.ext import ApplicationBuilder
 
 import memory
 import provisioning
+import security
 import adapter_telegram
 # Canal future (descomentar cuando esten listos):
 # import adapter_whatsapp
@@ -93,6 +94,11 @@ async def _start_web_server(telegram_app) -> None:
 
 
 async def main() -> None:
+    # 0. Validar configuración de seguridad al arrancar
+    sec_warnings = security.validate_startup_config()
+    for w in sec_warnings:
+        logger.warning(f"⚠️  SECURITY: {w}")
+
     # 1. Construir la Application de Telegram
     telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 

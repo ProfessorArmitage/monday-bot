@@ -6,3 +6,4 @@ aiohttp==3.9.5
 apscheduler==3.10.4
 packaging==24.1
 gtts==2.5.1
+cryptography>=42.0.0
