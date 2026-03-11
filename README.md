@@ -17,12 +17,13 @@
 [![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B_+_Whisper-F55036?style=flat-square)](https://groq.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Railway-336791?style=flat-square&logo=postgresql&logoColor=white)](https://railway.app)
 [![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white)](https://railway.app)
-[![Version](https://img.shields.io/badge/Version-1.8.0-27AE60?style=flat-square)](AGENTS.md)
-[![Lines](https://img.shields.io/badge/Code-8%2C700%2B_líneas-8E44AD?style=flat-square)](.))
+[![Version](https://img.shields.io/badge/Version-1.9.0-27AE60?style=flat-square)](AGENTS.md)
+[![Lines](https://img.shields.io/badge/Code-9%2C500%2B_líneas-8E44AD?style=flat-square)](.)
+[![Security](https://img.shields.io/badge/Security-Fernet_%2B_Rate_Limiting-E74C3C?style=flat-square)](security.py))
 
 <br/>
 
-*Memoria vertical · Skills evolutivas · Google Workspace · Voz · Multi-canal ready · DST-aware*
+*Memoria vertical · Skills evolutivas · Google Workspace · Voz · Multi-canal ready · DST-aware · Seguridad end-to-end*
 
 <br/>
 
@@ -167,6 +168,61 @@ channel_identities
 
 ---
 
+
+---
+
+## Seguridad
+
+A partir de v1.9.0 todas las capas del bot tienen protección activa. La lógica está centralizada en `security.py`.
+
+### Cifrado en reposo
+
+Los tokens OAuth de Google se cifran con **Fernet** (AES-128-CBC + HMAC-SHA256) antes de persistirse en PostgreSQL. Si alguien accede directamente a la base de datos, los tokens son ilegibles sin la `ENCRYPTION_KEY`.
+
+- Compatibilidad hacia atrás: tokens existentes (sin cifrar) se leen correctamente y se recifran en el siguiente refresh automático.
+- Clave generada una sola vez, guardada en Railway Variables. Si se pierde, los usuarios deben reconectar su cuenta de Google.
+
+### SSL en tránsito
+
+La conexión a PostgreSQL fuerza `sslmode=require` — el tráfico entre el bot y la base de datos siempre viaja cifrado, incluso dentro de la infraestructura de Railway.
+
+### Rate limiting por usuario
+
+Ventana deslizante en memoria — sin dependencias externas.
+
+| Parámetro | Default | Variable de entorno |
+|-----------|---------|---------------------|
+| Mensajes por ventana | 20 | `RATE_LIMIT_MESSAGES` |
+| Ventana de tiempo | 60 s | `RATE_LIMIT_WINDOW` |
+| Bloqueo tras exceder | 300 s | `RATE_LIMIT_COOLDOWN` |
+| Máx. audios por ventana | 10 | `RATE_LIMIT_VOICE_MAX` |
+| Longitud máx. de mensaje | 4 000 chars | `MAX_MESSAGE_LENGTH` |
+| Tamaño máx. de audio | 10 MB | `MAX_VOICE_SIZE_MB` |
+
+El estado del rate limiter se puede revisar y reiniciar con `/rate_status <user_id>` y `/rate_reset <user_id>` (requiere `ADMIN_USER_IDS`).
+
+### OAuth anti-CSRF
+
+El `state` del flujo OAuth 2.0 ya no expone el `user_id` directamente. Se genera un token aleatorio de 32 bytes con TTL de 10 minutos, de un solo uso. El callback lo valida antes de intercambiar el código con Google.
+
+### Reconexión automática de Google
+
+Cuando el token OAuth expira o es revocado (por ejemplo, tras meses sin uso o al cambiar permisos en la cuenta), el bot detecta el error HTTP 400/401, limpia el token inválido de la base de datos y envía al usuario instrucciones claras paso a paso en lugar de un error técnico.
+
+### Audit log de administración
+
+Todas las acciones del comando `/admin` se registran en Railway con el formato:
+
+```
+AUDIT | admin=<id> | action=<acción> | target=<id> | ok=True ✅
+```
+
+Filtrable en Railway con: `railway logs | grep AUDIT`
+
+### Validación al arrancar
+
+El bot verifica su configuración de seguridad al iniciar y emite advertencias en los logs si detecta configuración insegura (por ejemplo, `ENCRYPTION_KEY` ausente o `ADMIN_USER_IDS` vacío). No detiene el servicio — permite deploys graduales.
+
 ## Comandos disponibles
 
 ### Usuario
@@ -209,6 +265,8 @@ channel_identities
 | `/admin memoria exportar <id>` | Generar backup desde DB |
 | `/admin memoria ver_backups <id>` | Listar backups disponibles en Drive |
 | `/heartbeat` | Ejecutar heartbeat manual |
+| `/rate_status <id>` | Ver estado del rate limiter de un usuario |
+| `/rate_reset <id>` | Reiniciar rate limiter de un usuario |
 
 ---
 
@@ -255,6 +313,7 @@ onboarding.py             ← flujo de 5 pasos para usuarios nuevos
 conversation_context.py   ← detección de contexto de conversación
 tz_utils.py               ← timezone DST-aware · helpers DND
 identity.py               ← identidad personalizable del asistente
+security.py               ← cifrado Fernet · rate limiting · OAuth CSRF · audit log
 ```
 
 ---
@@ -276,6 +335,12 @@ identity.py               ← identidad personalizable del asistente
 | `SENDGRID_API_KEY` | ⬜ | Para activar adapter de Email |
 | `OPENAI_API_KEY` | ⬜ | Alternativa a Groq para STT/TTS |
 | `ELEVENLABS_API_KEY` | ⬜ | TTS premium (voz de alta calidad) |
+| `ENCRYPTION_KEY` | ⚠️ | Clave Fernet para cifrar tokens en DB — generar con `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `RATE_LIMIT_MESSAGES` | ⬜ | Máx. mensajes por ventana (default: 20) |
+| `RATE_LIMIT_WINDOW` | ⬜ | Ventana en segundos (default: 60) |
+| `RATE_LIMIT_COOLDOWN` | ⬜ | Bloqueo en segundos (default: 300) |
+| `MAX_MESSAGE_LENGTH` | ⬜ | Longitud máx. de mensaje en chars (default: 4000) |
+| `MAX_VOICE_SIZE_MB` | ⬜ | Tamaño máx. de audio en MB (default: 10) |
 
 ---
 
@@ -300,5 +365,5 @@ El `Dockerfile` incluye `ffmpeg`. La base de datos se inicializa sola al arranca
 ---
 
 <div align="center">
-<sub>Construido con ❤️ · Desplegado en Railway · Impulsado por Groq</sub>
+<sub>Construido con ❤️ · Desplegado en Railway · Impulsado por Groq · v1.9.0</sub>
 </div>
