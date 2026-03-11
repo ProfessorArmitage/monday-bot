@@ -19,7 +19,7 @@
 [![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white)](https://railway.app)
 [![Version](https://img.shields.io/badge/Version-1.9.0-27AE60?style=flat-square)](AGENTS.md)
 [![Lines](https://img.shields.io/badge/Code-9%2C500%2B_líneas-8E44AD?style=flat-square)](.)
-[![Security](https://img.shields.io/badge/Security-Fernet_%2B_Rate_Limiting-E74C3C?style=flat-square)](security.py))
+[![Security](https://img.shields.io/badge/Security-Fernet_%2B_Rate_Limiting-E74C3C?style=flat-square)](security.py)
 
 <br/>
 
