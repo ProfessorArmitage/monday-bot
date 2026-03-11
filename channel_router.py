@@ -34,6 +34,7 @@ import domain_seeds
 import memory_backup
 import skills as skills_engine
 from channel_types import InboundMessage, ChannelType, get_channel_style
+from google_auth import GoogleTokenRevokedError
 import security
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,24 @@ async def call_groq(system_prompt: str, history: list, user_text: str) -> str:
 
 
 # ── Acciones de Google ────────────────────────────────────────
+
+def _google_reconnect_message() -> str:
+    """
+    Mensaje amigable cuando el token de Google expiró o fue revocado.
+    Instrucciones simples paso a paso para usuarios no técnicos.
+    """
+    return (
+        "🔌 Tu conexión con Google dejó de funcionar.\n\n"
+        "Esto pasa cuando llevas mucho tiempo sin usar el bot, "
+        "o si cambiaste los permisos de tu cuenta de Google.\n\n"
+        "Para reconectarte, sigue estos pasos:\n"
+        "1️⃣ Escribe /desconectar_google\n"
+        "2️⃣ Escribe /conectar_google\n"
+        "3️⃣ Abre el link que te enviaré y autoriza el acceso\n\n"
+        "Después de eso podrás seguir usando tu calendario, "
+        "correo y Drive normalmente. 😊"
+    )
+
 
 async def execute_google_action(user_id: int, action_data: dict) -> str:
     """Ejecuta una acción de Google Workspace y retorna un resumen del resultado."""
@@ -225,6 +244,9 @@ async def execute_google_action(user_id: int, action_data: dict) -> str:
 
     except PermissionError:
         return "⚠️ No has conectado tu cuenta de Google. Usa /conectar_google."
+    except GoogleTokenRevokedError:
+        # Token revocado — mensaje amigable con instrucciones claras
+        return _google_reconnect_message()
     except Exception as e:
         logger.error(f"Error ejecutando acción Google: {e}")
         return f"⚠️ Error al ejecutar la acción: {str(e)[:100]}"

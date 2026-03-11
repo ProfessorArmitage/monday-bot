@@ -13,7 +13,7 @@ import json
 import httpx
 from datetime import datetime, timezone, timedelta
 import tz_utils
-from google_auth import get_valid_token
+from google_auth import get_valid_token, GoogleTokenRevokedError
 
 
 # ════════════════════════════════════════════════════════════
@@ -83,6 +83,8 @@ async def create_event(user_id: int, title: str = "", start: str = "", end: str 
                         logging.getLogger(__name__).info(
                             f"Timezone detectada de Google Calendar: {cal_tz} para user {user_id}"
                         )
+        except GoogleTokenRevokedError:
+            raise  # propagar — el bot mostrará instrucciones de reconexión
         except Exception:
             pass
 

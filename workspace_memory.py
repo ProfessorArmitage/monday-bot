@@ -143,12 +143,15 @@ async def _doc_exists(user_id: int, doc_id: str) -> bool:
                 data = r.json()
                 return not data.get("trashed", False)
         return False
+    except GoogleTokenRevokedError:
+        raise  # propagar — el bot mostrará instrucciones de reconexión
     except Exception:
         return False
 
 
 async def _find_doc_in_drive(user_id: int, title: str) -> str | None:
     """Busca un documento por título exacto en Drive."""
+    from google_auth import GoogleTokenRevokedError
     try:
         token = await get_valid_token(user_id)
         async with httpx.AsyncClient() as client:
@@ -163,6 +166,8 @@ async def _find_doc_in_drive(user_id: int, title: str) -> str | None:
             r.raise_for_status()
             files = r.json().get("files", [])
             return files[0]["id"] if files else None
+    except GoogleTokenRevokedError:
+        raise  # propagar hacia arriba — el caller mostrará instrucciones al usuario
     except Exception as e:
         logger.error(f"Error buscando doc en Drive: {e}")
         return None
@@ -211,6 +216,8 @@ async def _create_memory_doc(user_id: int, title: str, nombre: str) -> str | Non
         logger.info(f"Documento de memoria creado para usuario {user_id}: {doc_id}")
         return doc_id
 
+    except GoogleTokenRevokedError:
+        raise  # propagar — el bot mostrará instrucciones de reconexión
     except Exception as e:
         logger.error(f"Error creando doc de memoria: {e}")
         return None
@@ -244,6 +251,8 @@ async def read_memory_doc(user_id: int) -> str | None:
 
             return text.strip()
 
+    except GoogleTokenRevokedError:
+        raise  # propagar — el bot mostrará instrucciones de reconexión
     except Exception as e:
         logger.error(f"Error leyendo doc de memoria: {e}")
         return None
@@ -386,6 +395,8 @@ async def sync_memory_to_doc(user_id: int):
 
         logger.info(f"Memoria sincronizada al Doc para usuario {user_id}")
 
+    except GoogleTokenRevokedError:
+        raise  # propagar — el bot mostrará instrucciones de reconexión
     except Exception as e:
         logger.error(f"Error sincronizando memoria al Doc: {e}")
 

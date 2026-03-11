@@ -32,6 +32,20 @@ SCOPES = " ".join([
 ])
 
 
+
+class GoogleTokenRevokedError(Exception):
+    """
+    Se lanza cuando Google rechaza el refresh_token con 400/401.
+    Causas típicas:
+      - El usuario revocó el acceso desde myaccount.google.com
+      - El token lleva más de 6 meses sin usarse
+      - Las credenciales OAuth de la app cambiaron
+    El caller debe eliminar los tokens de la DB e indicar al usuario
+    que reconecte su cuenta con /desconectar_google y /conectar_google.
+    """
+    pass
+
+
 def get_auth_url(telegram_user_id: int) -> str:
     """
     Genera el URL de autorización de Google.
@@ -74,7 +88,11 @@ async def exchange_code_for_tokens(code: str) -> dict:
 
 
 async def refresh_access_token(refresh_token: str) -> dict:
-    """Renueva el access_token usando el refresh_token."""
+    """
+    Renueva el access_token usando el refresh_token.
+    Lanza GoogleTokenRevokedError si Google devuelve 400/401
+    (token revocado, expirado permanentemente, o credenciales inválidas).
+    """
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://oauth2.googleapis.com/token",
@@ -85,6 +103,11 @@ async def refresh_access_token(refresh_token: str) -> dict:
                 "grant_type":    "refresh_token",
             }
         )
+        if response.status_code in (400, 401):
+            raise GoogleTokenRevokedError(
+                f"Google rechazó el refresh token (HTTP {response.status_code}): "
+                f"{response.text[:120]}"
+            )
         response.raise_for_status()
         return response.json()
 
@@ -92,7 +115,9 @@ async def refresh_access_token(refresh_token: str) -> dict:
 async def get_valid_token(user_id: int) -> str | None:
     """
     Devuelve un access_token válido para el usuario.
-    Si expiró, lo renueva automáticamente con el refresh_token.
+    Si el token expiró, lo renueva automáticamente con el refresh_token.
+    Si el refresh_token fue revocado o es inválido, elimina los tokens de la DB
+    y lanza GoogleTokenRevokedError para que el caller pueda informar al usuario.
     Devuelve None si el usuario no ha conectado su cuenta.
     """
     import memory  # importar aquí para evitar circular imports
@@ -101,15 +126,20 @@ async def get_valid_token(user_id: int) -> str | None:
     if not tokens:
         return None
 
-    # Verificar si el token expiró (con 5 min de margen)
+    # Verificar si el access_token expiró (con 5 min de margen)
     expires_at = datetime.fromisoformat(tokens["expires_at"])
     if datetime.now() >= expires_at - timedelta(minutes=5):
-        # Renovar el token
-        new_tokens = await refresh_access_token(tokens["refresh_token"])
-        tokens["access_token"] = new_tokens["access_token"]
-        tokens["expires_at"] = (
-            datetime.now() + timedelta(seconds=new_tokens["expires_in"])
-        ).isoformat()
-        memory.save_google_tokens(user_id, tokens)
+        try:
+            new_tokens = await refresh_access_token(tokens["refresh_token"])
+            tokens["access_token"] = new_tokens["access_token"]
+            tokens["expires_at"] = (
+                datetime.now() + timedelta(seconds=new_tokens["expires_in"])
+            ).isoformat()
+            memory.save_google_tokens(user_id, tokens)
+        except GoogleTokenRevokedError:
+            # El token es permanentemente inválido — limpiar de DB y re-lanzar
+            # para que el caller muestre instrucciones de reconexión al usuario
+            memory.save_google_tokens(user_id, None)
+            raise
 
     return tokens["access_token"]
